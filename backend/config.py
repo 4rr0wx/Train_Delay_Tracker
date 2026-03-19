@@ -14,3 +14,11 @@ POLL_DURATION_MINUTES = 120  # Look ahead 2 hours
 # Only these lines are relevant for the commute
 RELEVANT_TRAIN_LINE = "CJX"   # Ternitz <-> Wien Meidling
 RELEVANT_SUBWAY_LINE = "U6"   # Wien Meidling <-> Wien Westbahnhof
+
+# User's specific commute departure times (HH:MM, local Vienna time)
+# Morning: CJX from Ternitz, Evening: U6 from Wien Westbahnhof
+MORNING_TRAINS = ["07:11", "07:40"]   # CJX ab Ternitz
+EVENING_TRAIN = "16:15"               # U6 ab Wien Westbahnhof
+
+# Tolerance in minutes for matching a train to a scheduled slot
+COMMUTE_TIME_TOLERANCE_MINUTES = 2
