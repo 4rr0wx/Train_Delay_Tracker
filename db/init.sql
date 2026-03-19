@@ -5,7 +5,8 @@ CREATE TABLE stations (
 
 INSERT INTO stations (id, name) VALUES
     ('1131839', 'Ternitz'),
-    ('1291501', 'Wien Westbahnhof (U)');
+    ('1191201', 'Wien Meidling'),
+    ('915006',  'Wien Westbahnhof (U6)');
 
 CREATE TABLE train_observations (
     id SERIAL PRIMARY KEY,

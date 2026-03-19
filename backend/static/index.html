@@ -11,13 +11,20 @@
     <header>
         <h1>Pendler Verspätungsstatistik</h1>
         <p class="subtitle">Ternitz &harr; Wien Westbahnhof</p>
+        <div class="route-info">
+            <span class="leg">Ternitz</span>
+            <span class="leg-line">CJX</span>
+            <span class="leg">Wien Meidling</span>
+            <span class="leg-line leg-subway">U6</span>
+            <span class="leg">Wien Westbahnhof</span>
+        </div>
         <div class="controls">
             <div class="direction-toggle">
                 <button id="btn-to-wien" class="toggle-btn active" onclick="setDirection('to_wien')">
-                    Ternitz &rarr; Wien
+                    &rarr; Richtung Wien
                 </button>
                 <button id="btn-to-ternitz" class="toggle-btn" onclick="setDirection('to_ternitz')">
-                    Wien &rarr; Ternitz
+                    &larr; Richtung Ternitz
                 </button>
             </div>
             <div class="period-select">
@@ -32,75 +39,120 @@
     </header>
 
     <main>
-        <section class="cards">
-            <div class="card">
-                <div class="card-label">Züge erfasst</div>
-                <div class="card-value" id="total-trains">–</div>
+        <!-- CJX Section -->
+        <section class="leg-section">
+            <div class="leg-header">
+                <span class="leg-badge train">CJX</span>
+                <span class="leg-title" id="cjx-title">Ternitz &rarr; Wien Meidling</span>
             </div>
-            <div class="card">
-                <div class="card-label">Ø Verspätung</div>
-                <div class="card-value" id="avg-delay">–</div>
+            <div class="cards">
+                <div class="card">
+                    <div class="card-label">Züge erfasst</div>
+                    <div class="card-value" id="cjx-total">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Ø Verspätung</div>
+                    <div class="card-value" id="cjx-avg-delay">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Ausfälle</div>
+                    <div class="card-value" id="cjx-cancelled">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Pünktlichkeit</div>
+                    <div class="card-value" id="cjx-on-time">–</div>
+                </div>
             </div>
-            <div class="card">
-                <div class="card-label">Ausfallrate</div>
-                <div class="card-value" id="cancellation-rate">–</div>
+        </section>
+
+        <!-- U6 Section -->
+        <section class="leg-section">
+            <div class="leg-header">
+                <span class="leg-badge subway">U6</span>
+                <span class="leg-title" id="u6-title">Wien Meidling &rarr; Wien Westbahnhof</span>
             </div>
-            <div class="card">
-                <div class="card-label">Pünktlichkeit</div>
-                <div class="card-value" id="on-time-rate">–</div>
+            <div class="cards">
+                <div class="card">
+                    <div class="card-label">Abfahrten erfasst</div>
+                    <div class="card-value" id="u6-total">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Ø Verspätung</div>
+                    <div class="card-value" id="u6-avg-delay">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Ausfälle</div>
+                    <div class="card-value" id="u6-cancelled">–</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Pünktlichkeit</div>
+                    <div class="card-value" id="u6-on-time">–</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Charts -->
+        <section class="charts-row">
+            <div class="chart-container">
+                <h3>Verspätungsverteilung <span class="chart-sub">(CJX)</span></h3>
+                <canvas id="chart-dist-cjx"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Verspätungsverteilung <span class="chart-sub">(U6)</span></h3>
+                <canvas id="chart-dist-u6"></canvas>
             </div>
         </section>
 
         <section class="charts-row">
             <div class="chart-container">
-                <h3>Verspätungsverteilung</h3>
-                <canvas id="chart-distribution"></canvas>
+                <h3>Verspätungstrend <span class="chart-sub">(CJX)</span></h3>
+                <canvas id="chart-trend-cjx"></canvas>
             </div>
             <div class="chart-container">
-                <h3>Verspätungstrend</h3>
-                <canvas id="chart-trend"></canvas>
+                <h3>Verspätungstrend <span class="chart-sub">(U6)</span></h3>
+                <canvas id="chart-trend-u6"></canvas>
             </div>
         </section>
 
         <section class="charts-row">
             <div class="chart-container">
-                <h3>Ø Verspätung nach Tageszeit</h3>
-                <canvas id="chart-hourly"></canvas>
+                <h3>Ø Verspätung nach Tageszeit <span class="chart-sub">(CJX)</span></h3>
+                <canvas id="chart-hourly-cjx"></canvas>
             </div>
             <div class="chart-container">
-                <h3>Ø Verspätung nach Wochentag</h3>
-                <canvas id="chart-daily"></canvas>
+                <h3>Ø Verspätung nach Wochentag <span class="chart-sub">(CJX)</span></h3>
+                <canvas id="chart-daily-cjx"></canvas>
             </div>
         </section>
 
+        <!-- Departures table -->
         <section class="table-section">
-            <h3>Letzte Abfahrten</h3>
+            <h3>Letzte Abfahrten &amp; Ankünfte</h3>
             <div class="table-wrapper">
                 <table id="departures-table">
                     <thead>
                         <tr>
-                            <th>Zeit</th>
+                            <th>Datum/Zeit</th>
                             <th>Linie</th>
                             <th>Typ</th>
-                            <th>Ziel</th>
+                            <th>Ziel/Herkunft</th>
                             <th>Verspätung</th>
                             <th>Status</th>
                             <th>Gleis</th>
                         </tr>
                     </thead>
-                    <tbody id="departures-body">
-                    </tbody>
+                    <tbody id="departures-body"></tbody>
                 </table>
             </div>
         </section>
 
-        <div id="empty-state" class="empty-state" style="display: none;">
+        <div id="empty-state" class="empty-state" style="display:none;">
             <p>Noch keine Daten vorhanden. Der Collector sammelt alle 5 Minuten neue Daten.</p>
         </div>
     </main>
 
     <footer>
-        <p>Datenquelle: ÖBB Transport REST API &middot; Aktualisierung alle 5 Minuten</p>
+        <p>Datenquelle: ÖBB Transport REST API &middot; Strecke: CJX (Ternitz &harr; Wien Meidling) + U6 (Wien Meidling &harr; Wien Westbahnhof) &middot; Aktualisierung alle 5 Minuten</p>
     </footer>
 
     <script src="app.js"></script>

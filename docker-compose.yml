@@ -22,7 +22,8 @@ services:
       DATABASE_URL: postgresql://tracker:${DB_PASSWORD:-tracker_secret}@db:5432/train_tracker
       API_BASE_URL: https://oebb.macistry.com/api
       TERNITZ_STATION_ID: "1131839"
-      WIEN_STATION_ID: "1291501"
+      WIEN_MEIDLING_STATION_ID: "1191201"
+      WIEN_WESTBAHNHOF_STATION_ID: "915006"
       POLL_INTERVAL_MINUTES: "5"
     ports:
       - "8080:8000"

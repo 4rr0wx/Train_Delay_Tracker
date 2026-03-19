@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from typing import Optional
 
 from database import get_db
 
@@ -11,10 +12,12 @@ router = APIRouter()
 def get_departures(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     limit: int = Query(20, ge=1, le=100),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    pc = "AND line_product = :product" if product else ""
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 trip_id,
                 line_name,
@@ -27,10 +30,11 @@ def get_departures(
                 platform
             FROM train_observations
             WHERE direction = :direction
+              {pc}
             ORDER BY planned_time DESC
             LIMIT :limit
         """),
-        {"direction": direction, "limit": limit},
+        {"direction": direction, "limit": limit, "product": product},
     )
 
     rows = result.fetchall()

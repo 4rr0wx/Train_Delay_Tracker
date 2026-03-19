@@ -1,20 +1,29 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from typing import Optional
 
 from database import get_db
 
 router = APIRouter()
+
+# product filter: "regional" = CJX train, "subway" = U6
+def _product_clause(product: Optional[str]) -> str:
+    if product:
+        return "AND line_product = :product"
+    return ""
 
 
 @router.get("/stats")
 def get_stats(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     days: int = Query(30, ge=1, le=365),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    pc = _product_clause(product)
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 COUNT(*) AS total_trains,
                 COUNT(*) FILTER (WHERE cancelled = TRUE) AS cancelled_count,
@@ -28,9 +37,10 @@ def get_stats(
                 COUNT(*) FILTER (WHERE cancelled = FALSE) AS non_cancelled_count
             FROM train_observations
             WHERE direction = :direction
+              {pc}
               AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
         """),
-        {"direction": direction, "days": days},
+        {"direction": direction, "days": days, "product": product},
     )
     row = result.fetchone()
 
@@ -39,6 +49,7 @@ def get_stats(
 
     return {
         "direction": direction,
+        "product": product,
         "period_days": days,
         "total_trains": total,
         "cancelled_count": row.cancelled_count or 0,
@@ -61,23 +72,26 @@ def get_stats(
 def get_delays_hourly(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     days: int = Query(30, ge=1, le=365),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    pc = _product_clause(product)
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 EXTRACT(HOUR FROM planned_time) AS hour,
                 ROUND(AVG(delay_seconds), 1) AS avg_delay,
                 COUNT(*) AS train_count
             FROM train_observations
             WHERE direction = :direction
+              {pc}
               AND cancelled = FALSE
               AND delay_seconds IS NOT NULL
               AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
             GROUP BY EXTRACT(HOUR FROM planned_time)
             ORDER BY hour
         """),
-        {"direction": direction, "days": days},
+        {"direction": direction, "days": days, "product": product},
     )
     return [
         {"hour": int(r.hour), "avg_delay_seconds": float(r.avg_delay), "train_count": r.train_count}
@@ -89,24 +103,27 @@ def get_delays_hourly(
 def get_delays_daily(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     days: int = Query(30, ge=1, le=365),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     day_names = {0: "Sonntag", 1: "Montag", 2: "Dienstag", 3: "Mittwoch", 4: "Donnerstag", 5: "Freitag", 6: "Samstag"}
+    pc = _product_clause(product)
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 EXTRACT(DOW FROM planned_time) AS dow,
                 ROUND(AVG(delay_seconds), 1) AS avg_delay,
                 COUNT(*) AS train_count
             FROM train_observations
             WHERE direction = :direction
+              {pc}
               AND cancelled = FALSE
               AND delay_seconds IS NOT NULL
               AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
             GROUP BY EXTRACT(DOW FROM planned_time)
             ORDER BY dow
         """),
-        {"direction": direction, "days": days},
+        {"direction": direction, "days": days, "product": product},
     )
     return [
         {
@@ -123,10 +140,12 @@ def get_delays_daily(
 def get_delays_trend(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     days: int = Query(30, ge=1, le=365),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    pc = _product_clause(product)
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 DATE(planned_time) AS date,
                 ROUND(AVG(delay_seconds), 1) AS avg_delay,
@@ -134,11 +153,12 @@ def get_delays_trend(
                 COUNT(*) FILTER (WHERE cancelled = TRUE) AS cancelled_count
             FROM train_observations
             WHERE direction = :direction
+              {pc}
               AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
             GROUP BY DATE(planned_time)
             ORDER BY date
         """),
-        {"direction": direction, "days": days},
+        {"direction": direction, "days": days, "product": product},
     )
     return [
         {
@@ -155,10 +175,12 @@ def get_delays_trend(
 def get_delay_distribution(
     direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
     days: int = Query(30, ge=1, le=365),
+    product: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
+    pc = _product_clause(product)
     result = db.execute(
-        text("""
+        text(f"""
             SELECT
                 CASE
                     WHEN delay_seconds IS NULL OR delay_seconds < 60 THEN 'Pünktlich'
@@ -170,6 +192,7 @@ def get_delay_distribution(
                 COUNT(*) AS count
             FROM train_observations
             WHERE direction = :direction
+              {pc}
               AND cancelled = FALSE
               AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
             GROUP BY bucket
@@ -182,6 +205,6 @@ def get_delay_distribution(
                     ELSE 5
                 END
         """),
-        {"direction": direction, "days": days},
+        {"direction": direction, "days": days, "product": product},
     )
     return [{"bucket": r.bucket, "count": r.count} for r in result.fetchall()]
