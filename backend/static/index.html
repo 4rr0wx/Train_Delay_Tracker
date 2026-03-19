@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pendler Verspätungsstatistik</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Pendler Verspätungsstatistik</h1>
+        <p class="subtitle">Ternitz &harr; Wien Westbahnhof</p>
+        <div class="controls">
+            <div class="direction-toggle">
+                <button id="btn-to-wien" class="toggle-btn active" onclick="setDirection('to_wien')">
+                    Ternitz &rarr; Wien
+                </button>
+                <button id="btn-to-ternitz" class="toggle-btn" onclick="setDirection('to_ternitz')">
+                    Wien &rarr; Ternitz
+                </button>
+            </div>
+            <div class="period-select">
+                <label for="period">Zeitraum:</label>
+                <select id="period" onchange="setPeriod(this.value)">
+                    <option value="7">7 Tage</option>
+                    <option value="30" selected>30 Tage</option>
+                    <option value="90">90 Tage</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section class="cards">
+            <div class="card">
+                <div class="card-label">Züge erfasst</div>
+                <div class="card-value" id="total-trains">–</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Ø Verspätung</div>
+                <div class="card-value" id="avg-delay">–</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Ausfallrate</div>
+                <div class="card-value" id="cancellation-rate">–</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Pünktlichkeit</div>
+                <div class="card-value" id="on-time-rate">–</div>
+            </div>
+        </section>
+
+        <section class="charts-row">
+            <div class="chart-container">
+                <h3>Verspätungsverteilung</h3>
+                <canvas id="chart-distribution"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Verspätungstrend</h3>
+                <canvas id="chart-trend"></canvas>
+            </div>
+        </section>
+
+        <section class="charts-row">
+            <div class="chart-container">
+                <h3>Ø Verspätung nach Tageszeit</h3>
+                <canvas id="chart-hourly"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3>Ø Verspätung nach Wochentag</h3>
+                <canvas id="chart-daily"></canvas>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <h3>Letzte Abfahrten</h3>
+            <div class="table-wrapper">
+                <table id="departures-table">
+                    <thead>
+                        <tr>
+                            <th>Zeit</th>
+                            <th>Linie</th>
+                            <th>Typ</th>
+                            <th>Ziel</th>
+                            <th>Verspätung</th>
+                            <th>Status</th>
+                            <th>Gleis</th>
+                        </tr>
+                    </thead>
+                    <tbody id="departures-body">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <div id="empty-state" class="empty-state" style="display: none;">
+            <p>Noch keine Daten vorhanden. Der Collector sammelt alle 5 Minuten neue Daten.</p>
+        </div>
+    </main>
+
+    <footer>
+        <p>Datenquelle: ÖBB Transport REST API &middot; Aktualisierung alle 5 Minuten</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
