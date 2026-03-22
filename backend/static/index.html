@@ -111,8 +111,20 @@
   <!-- ===== TAB: HEUTE ===== -->
   <div id="tab-heute" class="tab-content active">
     <div class="today-header">
-      <h2 id="today-date" class="today-date"></h2>
-      <span id="today-refresh" class="today-refresh-label"></span>
+      <button id="heute-prev" class="icon-btn" onclick="navigateTodayDate(-1)" disabled>&#8592;</button>
+      <div class="today-header-center">
+        <h2 id="today-date" class="today-date"></h2>
+        <span id="today-refresh" class="today-refresh-label"></span>
+      </div>
+      <div class="today-header-right">
+        <button id="heute-reset" class="icon-btn heute-reset-btn" onclick="resetToToday()" style="display:none">Heute</button>
+        <button id="heute-next" class="icon-btn" onclick="navigateTodayDate(+1)" disabled>&#8594;</button>
+      </div>
+    </div>
+
+    <div id="no-data-banner" class="alert-banner" style="display:none">
+      <span class="alert-icon">&#8505;</span>
+      <span>Für diesen Tag sind keine Fahrtdaten vorhanden (z.B. Wochenende oder kein Betrieb).</span>
     </div>
 
     <div id="diversion-alert" class="alert-banner" style="display:none">

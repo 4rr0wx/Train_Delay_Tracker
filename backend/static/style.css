@@ -264,9 +264,28 @@ body {
 /* ===================== TODAY TAB ===================== */
 .today-header {
   display: flex;
-  align-items: baseline;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+}
+.today-header-center {
+  flex: 1;
+  text-align: center;
+}
+.today-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.heute-reset-btn {
+  background: var(--red);
+  color: var(--white);
+  border-color: var(--red);
+}
+.heute-reset-btn:hover:not(:disabled) {
+  background: #c0001a;
+  border-color: #c0001a;
 }
 .today-date {
   font-size: 18px;
