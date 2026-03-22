@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from scheduler import scheduler
 from collector import collect_data
-from routes import health, stats, departures, commute
+from routes import health, stats, departures, commute, journeys
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,5 +35,6 @@ app.include_router(health.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(departures.router, prefix="/api")
 app.include_router(commute.router, prefix="/api")
+app.include_router(journeys.router, prefix="/api")
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

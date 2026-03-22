@@ -4,6 +4,7 @@ from sqlalchemy import text
 from typing import Optional
 
 from database import get_db
+from config import TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID, BADEN_STATION_ID
 
 router = APIRouter()
 
@@ -208,3 +209,52 @@ def get_delay_distribution(
         {"direction": direction, "days": days, "product": product},
     )
     return [{"bucket": r.bucket, "count": r.count} for r in result.fetchall()]
+
+
+@router.get("/delays/by-station")
+def get_delays_by_station(
+    direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Average delay per station for delay-buildup visualization."""
+    if direction == "to_wien":
+        stations = [
+            (TERNITZ_STATION_ID, "Ternitz", "regional"),
+            (BADEN_STATION_ID, "Baden bei Wien", "regional"),
+            (WIEN_MEIDLING_STATION_ID, "Wien Meidling (CJX)", "regional"),
+            (WIEN_MEIDLING_STATION_ID, "Wien Meidling (U6)", "subway"),
+            (WIEN_WESTBAHNHOF_STATION_ID, "Wien Westbahnhof", "subway"),
+        ]
+    else:
+        stations = [
+            (WIEN_WESTBAHNHOF_STATION_ID, "Wien Westbahnhof", "subway"),
+            (WIEN_MEIDLING_STATION_ID, "Wien Meidling (U6)", "subway"),
+            (WIEN_MEIDLING_STATION_ID, "Wien Meidling (CJX)", "regional"),
+            (BADEN_STATION_ID, "Baden bei Wien", "regional"),
+            (TERNITZ_STATION_ID, "Ternitz", "regional"),
+        ]
+
+    result = []
+    for station_id, label, product in stations:
+        row = db.execute(
+            text("""
+                SELECT
+                    ROUND(AVG(delay_seconds) FILTER (WHERE cancelled = FALSE AND delay_seconds IS NOT NULL), 1) AS avg_delay,
+                    COUNT(*) FILTER (WHERE cancelled = FALSE) AS train_count
+                FROM train_observations
+                WHERE station_id = :sid
+                  AND direction = :direction
+                  AND line_product = :product
+                  AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
+            """),
+            {"sid": station_id, "direction": direction, "product": product, "days": days},
+        ).fetchone()
+        result.append({
+            "station": label,
+            "station_id": station_id,
+            "avg_delay_seconds": float(row.avg_delay) if row.avg_delay else 0,
+            "avg_delay_minutes": round(float(row.avg_delay) / 60, 1) if row.avg_delay else 0,
+            "train_count": row.train_count or 0,
+        })
+    return result

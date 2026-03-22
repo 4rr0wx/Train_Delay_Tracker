@@ -1,230 +1,354 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pendler Verspätungsstatistik</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pendelstrecke Ternitz ↔ Wien</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <header>
-        <h1>Pendler Verspätungsstatistik</h1>
-        <p class="subtitle">Ternitz &harr; Wien Westbahnhof</p>
-        <div class="route-info">
-            <span class="leg">Ternitz</span>
-            <span class="leg-line">CJX</span>
-            <span class="leg">Wien Meidling</span>
-            <span class="leg-line leg-subway">U6</span>
-            <span class="leg">Wien Westbahnhof</span>
+
+<!-- ===================== HEADER ===================== -->
+<header class="app-header">
+  <div class="header-inner">
+    <div class="header-brand">
+      <span class="header-logo">&#9650;</span>
+      <div>
+        <div class="header-title">Pendelstrecke</div>
+        <div class="header-subtitle">Ternitz ↔ Wien Westbahnhof</div>
+      </div>
+    </div>
+    <div class="header-refresh">
+      <span id="refresh-indicator" class="refresh-dot"></span>
+      <span id="refresh-label" class="refresh-label">Live</span>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== NAV TABS (desktop) ===================== -->
+<nav class="tab-nav" id="main-nav">
+  <button class="tab-btn active" onclick="switchTab('heute')" id="nav-heute">Heute</button>
+  <button class="tab-btn" onclick="switchTab('reisen')" id="nav-reisen">Reiseverlauf</button>
+  <button class="tab-btn" onclick="switchTab('statistiken')" id="nav-statistiken">Statistiken</button>
+  <button class="tab-btn" onclick="switchTab('umleitungen')" id="nav-umleitungen">Umleitungen</button>
+</nav>
+
+<!-- ===================== FILTER PANEL ===================== -->
+<div class="filter-panel" id="filter-panel">
+  <div class="filter-toggle-bar" onclick="toggleFilter()">
+    <span class="filter-toggle-label">&#9881; Filter &amp; Zeitraum</span>
+    <span class="filter-toggle-arrow" id="filter-arrow">&#9660;</span>
+    <span class="filter-active-badge" id="filter-badge" style="display:none">aktiv</span>
+  </div>
+  <div class="filter-body" id="filter-body">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label class="filter-label">Zeitraum (Schnellwahl)</label>
+        <div class="btn-group">
+          <button class="filter-btn active" onclick="setPresetDays(7)" id="preset-7">7 Tage</button>
+          <button class="filter-btn" onclick="setPresetDays(30)" id="preset-30">30 Tage</button>
+          <button class="filter-btn" onclick="setPresetDays(90)" id="preset-90">90 Tage</button>
         </div>
-
-        <!-- Tab bar -->
-        <nav class="tab-bar">
-            <button class="tab-btn active" onclick="switchTab('overview')">Übersicht</button>
-            <button class="tab-btn" onclick="switchTab('stats')">Statistiken</button>
-        </nav>
-    </header>
-
-    <main>
-        <!-- ======================================================= -->
-        <!-- TAB: ÜBERSICHT                                           -->
-        <!-- ======================================================= -->
-        <div id="tab-overview" class="tab-content">
-            <div class="overview-date" id="overview-date"></div>
-
-            <!-- MORNING -->
-            <section class="overview-section">
-                <div class="overview-section-header">
-                    <span class="section-icon">☀</span>
-                    <span>Morgen &mdash; Ternitz &rarr; Wien Westbahnhof</span>
-                </div>
-
-                <div class="commute-cards" id="morning-cards">
-                    <!-- filled by JS -->
-                </div>
-
-                <div class="connection-info" id="morning-connection">
-                    <!-- U6 connection info filled by JS -->
-                </div>
-            </section>
-
-            <!-- EVENING -->
-            <section class="overview-section">
-                <div class="overview-section-header">
-                    <span class="section-icon">🌆</span>
-                    <span>Nachmittag &mdash; Wien Westbahnhof &rarr; Ternitz</span>
-                </div>
-
-                <div class="commute-cards" id="evening-cards">
-                    <!-- filled by JS -->
-                </div>
-
-                <div class="connection-info" id="evening-connection">
-                    <!-- CJX connection info filled by JS -->
-                </div>
-            </section>
-
-            <p class="overview-hint">Aktualisierung alle 60 Sekunden &middot; Historische Daten: letzte 30 Tage</p>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Von</label>
+        <input type="date" class="filter-input" id="filter-date-from" onchange="onCustomDate()" />
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Bis</label>
+        <input type="date" class="filter-input" id="filter-date-to" onchange="onCustomDate()" />
+      </div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-group">
+        <label class="filter-label">Wochentage</label>
+        <div class="btn-group dow-group">
+          <button class="filter-btn active" onclick="toggleDow(1)" id="dow-1">Mo</button>
+          <button class="filter-btn active" onclick="toggleDow(2)" id="dow-2">Di</button>
+          <button class="filter-btn active" onclick="toggleDow(3)" id="dow-3">Mi</button>
+          <button class="filter-btn active" onclick="toggleDow(4)" id="dow-4">Do</button>
+          <button class="filter-btn active" onclick="toggleDow(5)" id="dow-5">Fr</button>
+          <button class="filter-btn" onclick="toggleDow(6)" id="dow-6">Sa</button>
+          <button class="filter-btn" onclick="toggleDow(0)" id="dow-0">So</button>
         </div>
-
-        <!-- ======================================================= -->
-        <!-- TAB: STATISTIKEN                                         -->
-        <!-- ======================================================= -->
-        <div id="tab-stats" class="tab-content" style="display:none;">
-            <div class="stats-controls">
-                <div class="direction-toggle">
-                    <button id="btn-to-wien" class="toggle-btn active" onclick="setDirection('to_wien')">
-                        &rarr; Richtung Wien
-                    </button>
-                    <button id="btn-to-ternitz" class="toggle-btn" onclick="setDirection('to_ternitz')">
-                        &larr; Richtung Ternitz
-                    </button>
-                </div>
-                <div class="period-select">
-                    <label for="period">Zeitraum:</label>
-                    <select id="period" onchange="setPeriod(this.value)">
-                        <option value="7">7 Tage</option>
-                        <option value="30" selected>30 Tage</option>
-                        <option value="90">90 Tage</option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- CJX Section -->
-            <section class="leg-section">
-                <div class="leg-header">
-                    <span class="leg-badge train">CJX</span>
-                    <span class="leg-title" id="cjx-title">Ternitz &rarr; Wien Meidling</span>
-                </div>
-                <div class="cards">
-                    <div class="card">
-                        <div class="card-label">Züge erfasst</div>
-                        <div class="card-value" id="cjx-total">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Ø Verspätung</div>
-                        <div class="card-value" id="cjx-avg-delay">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Ausfälle</div>
-                        <div class="card-value" id="cjx-cancelled">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Pünktlichkeit</div>
-                        <div class="card-value" id="cjx-on-time">–</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- U6 Section -->
-            <section class="leg-section">
-                <div class="leg-header">
-                    <span class="leg-badge subway">U6</span>
-                    <span class="leg-title" id="u6-title">Wien Meidling &rarr; Wien Westbahnhof</span>
-                </div>
-                <div class="cards">
-                    <div class="card">
-                        <div class="card-label">Abfahrten erfasst</div>
-                        <div class="card-value" id="u6-total">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Ø Verspätung</div>
-                        <div class="card-value" id="u6-avg-delay">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Ausfälle</div>
-                        <div class="card-value" id="u6-cancelled">–</div>
-                    </div>
-                    <div class="card">
-                        <div class="card-label">Pünktlichkeit</div>
-                        <div class="card-value" id="u6-on-time">–</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Charts -->
-            <section class="charts-row">
-                <div class="chart-container">
-                    <h3>Verspätungsverteilung <span class="chart-sub">(CJX)</span></h3>
-                    <canvas id="chart-dist-cjx"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Verspätungsverteilung <span class="chart-sub">(U6)</span></h3>
-                    <canvas id="chart-dist-u6"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row">
-                <div class="chart-container">
-                    <h3>Verspätungstrend <span class="chart-sub">(CJX)</span></h3>
-                    <canvas id="chart-trend-cjx"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Verspätungstrend <span class="chart-sub">(U6)</span></h3>
-                    <canvas id="chart-trend-u6"></canvas>
-                </div>
-            </section>
-
-            <section class="charts-row">
-                <div class="chart-container">
-                    <h3>Ø Verspätung nach Tageszeit <span class="chart-sub">(CJX)</span></h3>
-                    <canvas id="chart-hourly-cjx"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Ø Verspätung nach Wochentag <span class="chart-sub">(CJX)</span></h3>
-                    <canvas id="chart-daily-cjx"></canvas>
-                </div>
-            </section>
-
-            <!-- Departures table -->
-            <section class="table-section">
-                <div class="table-header">
-                    <h3>Letzte Abfahrten &amp; Ankünfte</h3>
-                    <div class="table-filters">
-                        <div class="filter-group">
-                            <span class="filter-label">Linie:</span>
-                            <button class="filter-btn active" onclick="setProductFilter(null)">Alle</button>
-                            <button class="filter-btn" onclick="setProductFilter('regional')">CJX</button>
-                            <button class="filter-btn" onclick="setProductFilter('subway')">U6</button>
-                        </div>
-                        <div class="filter-group">
-                            <span class="filter-label">Status:</span>
-                            <button class="filter-btn active" onclick="setStatusFilter(null)">Alle</button>
-                            <button class="filter-btn" onclick="setStatusFilter('on_time')">Pünktlich</button>
-                            <button class="filter-btn" onclick="setStatusFilter('delayed')">Verspätet</button>
-                            <button class="filter-btn" onclick="setStatusFilter('cancelled')">Ausfall</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="table-wrapper">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Datum/Zeit</th>
-                                <th>Linie</th>
-                                <th>Station</th>
-                                <th>Ziel/Herkunft</th>
-                                <th>Verspätung</th>
-                                <th>Status</th>
-                                <th>Gleis</th>
-                            </tr>
-                        </thead>
-                        <tbody id="departures-body"></tbody>
-                    </table>
-                </div>
-            </section>
-
-            <div id="empty-state" class="empty-state" style="display:none;">
-                <p>Noch keine Daten vorhanden. Der Collector sammelt alle 5 Minuten neue Daten.</p>
-            </div>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Richtung</label>
+        <div class="btn-group">
+          <button class="filter-btn active" onclick="setDirection('to_wien')" id="dir-wien">→ Wien</button>
+          <button class="filter-btn" onclick="setDirection('to_ternitz')" id="dir-ternitz">→ Ternitz</button>
         </div>
-    </main>
+      </div>
+    </div>
+    <div class="filter-row">
+      <div class="filter-group">
+        <label class="filter-label">Pendelzüge (CJX ab Ternitz)</label>
+        <div class="btn-group">
+          <button class="filter-btn" onclick="toggleTime('07:11')" id="time-0711">07:11</button>
+          <button class="filter-btn" onclick="toggleTime('07:40')" id="time-0740">07:40</button>
+          <button class="filter-btn active" onclick="clearTimes()" id="time-all">Alle Züge</button>
+        </div>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Linie</label>
+        <div class="btn-group">
+          <button class="filter-btn" onclick="setProduct('regional')" id="prod-cjx">CJX</button>
+          <button class="filter-btn" onclick="setProduct('subway')" id="prod-u6">U6</button>
+          <button class="filter-btn active" onclick="setProduct(null)" id="prod-all">Alle</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-    <footer>
-        <p>Datenquelle: ÖBB Transport REST API &middot; CJX (Ternitz &harr; Wien Meidling) + U6 (Wien Meidling &harr; Wien Westbahnhof)</p>
-    </footer>
+<!-- ===================== MAIN CONTENT ===================== -->
+<main class="app-main">
 
-    <script src="app.js"></script>
+  <!-- ===== TAB: HEUTE ===== -->
+  <div id="tab-heute" class="tab-content active">
+    <div class="today-header">
+      <h2 id="today-date" class="today-date"></h2>
+      <span id="today-refresh" class="today-refresh-label"></span>
+    </div>
+
+    <div id="diversion-alert" class="alert-banner" style="display:none">
+      <span class="alert-icon">&#9888;</span>
+      <span id="diversion-alert-text">Heute Umleitung erkannt – kein Halt in Baden!</span>
+    </div>
+
+    <section class="commute-section">
+      <div class="section-header">
+        <span class="section-badge cjx-badge">CJX</span>
+        <h3>Morgen &rarr; Wien Meidling</h3>
+        <span class="section-sub">ab Ternitz</span>
+      </div>
+      <div id="morning-cards" class="commute-cards"></div>
+      <div id="morning-connection" class="connection-hint"></div>
+    </section>
+
+    <section class="commute-section">
+      <div class="section-header">
+        <span class="section-badge u6-badge">U6</span>
+        <h3>Abend &rarr; Ternitz</h3>
+        <span class="section-sub">ab Wien Westbahnhof</span>
+      </div>
+      <div id="evening-cards" class="commute-cards"></div>
+      <div id="evening-connection" class="connection-hint"></div>
+    </section>
+  </div>
+
+  <!-- ===== TAB: REISEVERLAUF ===== -->
+  <div id="tab-reisen" class="tab-content">
+    <div class="section-toolbar">
+      <div class="toolbar-info">
+        <span id="journey-count" class="journey-count">—</span>
+        <span class="journey-count-label">Reisen gefunden</span>
+      </div>
+      <div class="toolbar-pagination">
+        <button class="icon-btn" onclick="prevPage()" id="btn-prev" disabled>&#8592; Zurück</button>
+        <span id="page-indicator" class="page-indicator">Seite 1</span>
+        <button class="icon-btn" onclick="nextPage()" id="btn-next" disabled>Weiter &#8594;</button>
+      </div>
+    </div>
+    <div id="journey-list" class="journey-list">
+      <div class="empty-state">Wähle einen Zeitraum und klicke auf einen Filter.</div>
+    </div>
+  </div>
+
+  <!-- ===== TAB: STATISTIKEN ===== -->
+  <div id="tab-statistiken" class="tab-content">
+    <div class="stat-cards" id="stat-summary-cards">
+      <div class="stat-card">
+        <div class="stat-card-label">Gesamtreisen</div>
+        <div class="stat-card-value" id="stat-total">—</div>
+      </div>
+      <div class="stat-card stat-card-accent">
+        <div class="stat-card-label">Ø Verspätung (Ankunft)</div>
+        <div class="stat-card-value" id="stat-avg-delay">—</div>
+      </div>
+      <div class="stat-card stat-card-green">
+        <div class="stat-card-label">Pünktlich</div>
+        <div class="stat-card-value" id="stat-on-time">—</div>
+      </div>
+      <div class="stat-card stat-card-red">
+        <div class="stat-card-label">Ausfälle</div>
+        <div class="stat-card-value" id="stat-cancelled">—</div>
+      </div>
+      <div class="stat-card stat-card-orange">
+        <div class="stat-card-label">Umleitungen (kein Baden)</div>
+        <div class="stat-card-value" id="stat-diversions">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Ø Verspätungsaufbau</div>
+        <div class="stat-card-value" id="stat-delay-added">—</div>
+        <div class="stat-card-sub">auf dem Weg zum Ziel</div>
+      </div>
+    </div>
+
+    <div class="stats-period-bar">
+      <span class="stats-period-label">Zeitraum Statistiken:</span>
+      <div class="btn-group">
+        <button class="filter-btn" onclick="setStatsDays(7)" id="sdays-7">7 Tage</button>
+        <button class="filter-btn active" onclick="setStatsDays(30)" id="sdays-30">30 Tage</button>
+        <button class="filter-btn" onclick="setStatsDays(90)" id="sdays-90">90 Tage</button>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card chart-card-wide">
+        <div class="chart-card-header">
+          <h4>Verspätungsaufbau nach Station</h4>
+          <p class="chart-desc">Ø Verspätung (Minuten) an jedem Halt entlang der Strecke</p>
+        </div>
+        <canvas id="chart-by-station"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <h4>Verspätungsverteilung CJX</h4>
+          <p class="chart-desc">Anzahl Fahrten nach Verspätungskategorie</p>
+        </div>
+        <canvas id="chart-dist-cjx"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <h4>Verspätungsverteilung U6</h4>
+          <p class="chart-desc">Anzahl Fahrten nach Verspätungskategorie</p>
+        </div>
+        <canvas id="chart-dist-u6"></canvas>
+      </div>
+
+      <div class="chart-card chart-card-wide">
+        <div class="chart-card-header">
+          <h4>Verspätungstrend (CJX)</h4>
+          <p class="chart-desc">Ø Verspätung und Anzahl Fahrten pro Tag</p>
+        </div>
+        <canvas id="chart-trend"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <h4>Nach Wochentag (CJX)</h4>
+          <p class="chart-desc">Ø Verspätung je Wochentag</p>
+        </div>
+        <canvas id="chart-daily"></canvas>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-header">
+          <h4>Nach Uhrzeit (CJX)</h4>
+          <p class="chart-desc">Ø Verspätung je Stunde</p>
+        </div>
+        <canvas id="chart-hourly"></canvas>
+      </div>
+
+      <div class="chart-card chart-card-wide">
+        <div class="chart-card-header">
+          <h4>Vergleich 07:11 vs. 07:40</h4>
+          <p class="chart-desc">Ø Verspätung bei Abfahrt Ternitz – letzte 30 Tage, nur Mo–Fr</p>
+        </div>
+        <canvas id="chart-compare-trains"></canvas>
+      </div>
+    </div>
+
+    <div class="table-section">
+      <div class="table-header">
+        <h4>Letzte Fahrten (Rohdaten)</h4>
+        <div class="table-filters">
+          <select class="filter-select" id="table-product-filter" onchange="loadDepartures()">
+            <option value="">CJX + U6</option>
+            <option value="regional">Nur CJX</option>
+            <option value="subway">Nur U6</option>
+          </select>
+          <select class="filter-select" id="table-status-filter" onchange="loadDepartures()">
+            <option value="">Alle Status</option>
+            <option value="on_time">Pünktlich</option>
+            <option value="delayed">Verspätet</option>
+            <option value="cancelled">Ausfall</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table" id="departures-table">
+          <thead>
+            <tr>
+              <th>Zeit</th>
+              <th>Linie</th>
+              <th>Station</th>
+              <th>Ziel</th>
+              <th>Verspätung</th>
+              <th>Status</th>
+              <th>Gleis</th>
+            </tr>
+          </thead>
+          <tbody id="departures-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TAB: UMLEITUNGEN ===== -->
+  <div id="tab-umleitungen" class="tab-content">
+    <div class="stat-cards">
+      <div class="stat-card stat-card-orange">
+        <div class="stat-card-label">Erkannte Umleitungen</div>
+        <div class="stat-card-value" id="diversion-total">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Umleitungsrate</div>
+        <div class="stat-card-value" id="diversion-rate">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-label">Betrachtungszeitraum</div>
+        <div class="stat-card-value" id="diversion-period">90 Tage</div>
+      </div>
+    </div>
+
+    <div class="info-box">
+      <span class="info-icon">&#9432;</span>
+      <div>
+        <strong>Was ist eine Umleitung?</strong><br />
+        Wenn ein CJX von Ternitz nach Wien über eine alternative Strecke fährt,
+        entfällt der Halt in <strong>Baden bei Wien</strong>. Diese Fahrten werden
+        automatisch erkannt: eine Fahrt gilt als Umleitung, wenn Beobachtungen
+        in Ternitz <em>und</em> Wien Meidling vorliegen, aber <em>kein</em> Halt
+        in Baden erfasst wurde. Die Erkennung ist ab dem Zeitpunkt aktiv, ab dem
+        Baden im System erfasst wird.
+      </div>
+    </div>
+
+    <div id="diversion-list" class="diversion-list">
+      <div class="empty-state">Lade Umleitungsdaten…</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ===================== MOBILE BOTTOM NAV ===================== -->
+<nav class="bottom-nav" id="bottom-nav">
+  <button class="bottom-nav-btn active" onclick="switchTab('heute')" id="bnav-heute">
+    <span class="bnav-icon">&#9737;</span>
+    <span class="bnav-label">Heute</span>
+  </button>
+  <button class="bottom-nav-btn" onclick="switchTab('reisen')" id="bnav-reisen">
+    <span class="bnav-icon">&#9654;</span>
+    <span class="bnav-label">Reisen</span>
+  </button>
+  <button class="bottom-nav-btn" onclick="switchTab('statistiken')" id="bnav-statistiken">
+    <span class="bnav-icon">&#9650;</span>
+    <span class="bnav-label">Statistik</span>
+  </button>
+  <button class="bottom-nav-btn" onclick="switchTab('umleitungen')" id="bnav-umleitungen">
+    <span class="bnav-icon">&#8644;</span>
+    <span class="bnav-label">Umleitungen</span>
+  </button>
+</nav>
+
+<script src="app.js"></script>
 </body>
 </html>
