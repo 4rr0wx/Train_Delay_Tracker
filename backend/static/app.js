@@ -287,26 +287,24 @@ function delayBadge(today) {
   return `<span class="delay-badge bad">+${min} Min</span>`;
 }
 
-function commuteCard(train) {
+// Render a single leg (CJX or U6) as a compact sub-card within a journey card
+function legCard(train) {
   const isSubway = train.product === "subway";
-  const cardClass = train.today.cancelled ? "commute-card cancelled-card"
-                  : isSubway ? "commute-card subway" : "commute-card";
   const lineClass = isSubway ? "commute-card-line subway" : "commute-card-line";
+  const ds = train.today.delay_seconds;
+  const cls = stationDelayClass(ds);
+  const delayMin = ds !== null && ds !== undefined
+    ? (ds >= 0 ? `+${Math.round(ds / 60)}` : `${Math.round(ds / 60)}`)
+    : "?";
   const h = train.history_30d;
 
-  // For today's card we don't have per-station data in the overview endpoint,
-  // so we show a simplified timeline with what we know
-  const stationTimeline = buildCommuteTimeline(train);
-
   return `
-    <div class="${cardClass}">
-      <div class="commute-card-time">${train.planned_departure}</div>
-      <span class="${lineClass}">${train.line}</span>
-      <div class="commute-card-route">${train.from_station} &rarr; ${train.to_station}</div>
-      ${stationTimeline}
-      <div class="commute-today">
-        <span class="today-label">Heute:</span>
-        ${delayBadge(train.today)}
+    <div class="leg-card ${train.today.cancelled ? 'cancelled-leg' : ''}">
+      <div class="leg-header">
+        <div class="leg-time">${train.planned_departure}</div>
+        <span class="${lineClass}">${train.line}</span>
+        <div class="leg-route">${train.from_station} &rarr; ${train.to_station}</div>
+        <div class="leg-today">${delayBadge(train.today)}</div>
       </div>
       <div class="commute-history">
         <span class="hist-item">Ø Verspätung (30T)</span>
@@ -318,25 +316,35 @@ function commuteCard(train) {
         <span class="hist-item">Beobachtungen</span>
         <span class="hist-value">${h.total_observed}</span>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
-function buildCommuteTimeline(train) {
-  const ds = train.today.delay_seconds;
-  const cls = stationDelayClass(ds);
-  const delayMin = ds !== null && ds !== undefined ? (ds >= 0 ? `+${Math.round(ds/60)}` : `${Math.round(ds/60)}`) : "?";
+// Journey card groups two legs (CJX + U6) with a full station timeline across both
+function journeyCommuteCard(journey, isEvening = false) {
+  const cjx = isEvening ? journey.cjx : journey.cjx;
+  const u6  = journey.u6;
 
-  if (train.product === "regional") {
-    // CJX: Ternitz → Baden → Meidling
-    return `
+  // Full timeline: for morning Ternitz→Baden→Meidling→Westbahnhof
+  //               for evening Westbahnhof→Meidling→Ternitz
+  const cjxDs = cjx.today.delay_seconds;
+  const u6Ds  = u6.today.delay_seconds;
+  const cjxCls = stationDelayClass(cjxDs);
+  const u6Cls  = stationDelayClass(u6Ds);
+
+  function delayText(ds, seen) {
+    if (!seen || ds === null || ds === undefined) return "—";
+    return (ds >= 0 ? `+${Math.round(ds / 60)}` : `${Math.round(ds / 60)}`) + " Min";
+  }
+
+  let timeline;
+  if (!isEvening) {
+    // Morning: Ternitz → Baden → Meidling ~~transfer~~ Meidling → Westbahnhof
+    timeline = `
       <div class="station-timeline">
         <div class="st-stop">
-          <div class="st-dot ${train.today.seen_today ? cls : 'unknown'}"></div>
+          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
           <div class="st-label">Ternitz</div>
-          <div class="st-delay ${train.today.seen_today ? cls : ''}">
-            ${train.today.seen_today && ds !== null ? delayMin + ' Min' : '—'}
-          </div>
+          <div class="st-delay ${cjx.today.seen_today ? cjxCls : ''}">${delayText(cjxDs, cjx.today.seen_today)}</div>
         </div>
         <div class="st-line"></div>
         <div class="st-stop">
@@ -345,57 +353,81 @@ function buildCommuteTimeline(train) {
           <div class="st-delay">—</div>
         </div>
         <div class="st-line"></div>
-        <div class="st-stop">
+        <div class="st-stop st-transfer">
           <div class="st-dot unknown"></div>
           <div class="st-label">Meidling</div>
-          <div class="st-delay">—</div>
+          <div class="st-delay">Umstieg</div>
+        </div>
+        <div class="st-line st-line-transfer"></div>
+        <div class="st-stop">
+          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
+          <div class="st-label">Westbhf</div>
+          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
         </div>
       </div>`;
   } else {
-    // U6: Westbahnhof → Meidling
-    return `
+    // Evening: Westbahnhof → Meidling ~~transfer~~ Meidling → Baden → Ternitz
+    timeline = `
       <div class="station-timeline">
         <div class="st-stop">
-          <div class="st-dot ${train.today.seen_today ? cls : 'unknown'}"></div>
+          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
           <div class="st-label">Westbhf</div>
-          <div class="st-delay ${train.today.seen_today ? cls : ''}">
-            ${train.today.seen_today && ds !== null ? delayMin + ' Min' : '—'}
-          </div>
+          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
+        </div>
+        <div class="st-line"></div>
+        <div class="st-stop st-transfer">
+          <div class="st-dot unknown"></div>
+          <div class="st-label">Meidling</div>
+          <div class="st-delay">Umstieg</div>
+        </div>
+        <div class="st-line st-line-transfer"></div>
+        <div class="st-stop">
+          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
+          <div class="st-label">Baden</div>
+          <div class="st-delay">—</div>
         </div>
         <div class="st-line"></div>
         <div class="st-stop">
-          <div class="st-dot unknown"></div>
-          <div class="st-label">Meidling</div>
-          <div class="st-delay">—</div>
+          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
+          <div class="st-label">Ternitz</div>
+          <div class="st-delay ${cjx.today.seen_today ? cjxCls : ''}">${delayText(cjxDs, cjx.today.seen_today)}</div>
         </div>
       </div>`;
   }
+
+  return `
+    <div class="commute-journey-card">
+      ${timeline}
+      <div class="commute-legs">
+        ${isEvening ? legCard(u6) + legCard(cjx) : legCard(cjx) + legCard(u6)}
+      </div>
+    </div>`;
 }
 
-function renderMorning(trains) {
-  document.getElementById("morning-cards").innerHTML = trains.map(commuteCard).join("");
-  const connections = {
-    "07:11": { u6dep: "08:01", westbhf: "08:07" },
-    "07:40": { u6dep: "08:30", westbhf: "08:36" },
-  };
-  const parts = trains.map(t => {
-    const c = connections[t.planned_departure];
-    if (!c) return "";
-    const delayed = t.today.seen_today && !t.today.cancelled && (t.today.delay_minutes || 0) > 4;
-    const warn = delayed ? " <strong>⚠ Verspätung – Anschluss prüfen!</strong>" : "";
-    return `CJX ${t.planned_departure}: U6 ab Meidling ~${c.u6dep} → Westbahnhof ~${c.westbhf}${warn}`;
-  });
-  document.getElementById("morning-connection").innerHTML =
-    `<span>&#128279;</span><span><strong>U6-Anschluss:</strong> ${parts.join(" &nbsp;|&nbsp; ")}</span>`;
+function renderMorning(journeys) {
+  document.getElementById("morning-cards").innerHTML = journeys.map(j => journeyCommuteCard(j, false)).join("");
+  // Connection warning if CJX is heavily delayed
+  const warnings = journeys
+    .filter(j => j.cjx.today.seen_today && !j.cjx.today.cancelled && (j.cjx.today.delay_minutes || 0) > 4)
+    .map(j => `CJX ${j.cjx_dep}: ⚠ Verspätung – U6-Anschluss ${j.u6_dep} prüfen!`);
+  const hint = document.getElementById("morning-connection");
+  hint.style.display = warnings.length > 0 ? "flex" : "none";
+  if (warnings.length > 0) {
+    hint.innerHTML = `<span>&#9888;</span><span>${warnings.join(" | ")}</span>`;
+  }
 }
 
-function renderEvening(trains) {
-  document.getElementById("evening-cards").innerHTML = trains.map(commuteCard).join("");
-  const t = trains[0];
-  const delayed = t && t.today.seen_today && !t.today.cancelled && (t.today.delay_minutes || 0) > 5;
-  const warn = delayed ? " <strong>⚠ Verspätung – Anschluss prüfen!</strong>" : "";
-  document.getElementById("evening-connection").innerHTML =
-    `<span>&#128279;</span><span><strong>CJX-Anschluss:</strong> Wien Meidling ~16:21 &rarr; Ternitz ~17:02${warn}</span>`;
+function renderEvening(journey) {
+  // journey is now a single object with .u6 and .cjx legs
+  document.getElementById("evening-cards").innerHTML = journeyCommuteCard(journey, true);
+  // Show warning if U6 is so delayed that CJX connection at 16:35 is at risk
+  const u6delayed = journey.u6.today.seen_today && !journey.u6.today.cancelled
+    && (journey.u6.today.delay_minutes || 0) > 10;
+  const hint = document.getElementById("evening-connection");
+  hint.style.display = u6delayed ? "flex" : "none";
+  if (u6delayed) {
+    hint.innerHTML = `<span>&#9888;</span><span>U6 stark verspätet – CJX-Anschluss ${journey.cjx_dep} möglicherweise gefährdet!</span>`;
+  }
 }
 
 // ============================================================

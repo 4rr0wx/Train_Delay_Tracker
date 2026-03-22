@@ -467,6 +467,71 @@ body {
 .hist-item { font-size: 11px; color: var(--grey-500); }
 .hist-value { font-size: 12px; font-weight: 600; color: var(--dark); text-align: right; }
 
+/* ===== Journey commute card (groups two legs) ===== */
+.commute-journey-card {
+  flex: 1;
+  min-width: 300px;
+  background: var(--white);
+  border: 1px solid var(--grey-200);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+/* Transfer dot styling */
+.st-transfer .st-dot {
+  background: var(--grey-200);
+  border: 2px dashed var(--grey-500);
+}
+.st-transfer .st-delay {
+  font-size: 9px;
+  color: var(--grey-500);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.st-line-transfer {
+  background: none !important;
+  border-top: 2px dashed var(--grey-300) !important;
+}
+
+.commute-journey-card .station-timeline {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--grey-100);
+}
+
+.commute-legs {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Individual leg sub-card */
+.leg-card {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--grey-100);
+}
+.leg-card:last-child { border-bottom: none; }
+.leg-card.cancelled-leg { opacity: 0.75; }
+.leg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.leg-time {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--dark);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+.leg-route {
+  font-size: 12px;
+  color: var(--grey-700);
+  flex: 1;
+}
+.leg-today { margin-left: auto; }
+
 .connection-hint {
   padding: 10px 16px 14px;
   font-size: 12px;
