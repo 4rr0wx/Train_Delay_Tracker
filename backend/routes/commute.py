@@ -9,7 +9,10 @@ Evening journey:
   U6 16:15 ab Wien Westbahnhof → Wien Meidling, dann CJX 16:35 → Ternitz
 """
 
-from fastapi import APIRouter, Depends
+from datetime import date as date_type
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -24,10 +27,34 @@ def _parse_hhmm(t: str) -> tuple[int, int]:
     return int(h), int(m)
 
 
-def _today_status(db: Session, direction: str, product: str, hour: int, minute: int, station_id: str | None = None) -> dict:
-    """Get today's latest observation for a specific scheduled departure."""
+def _today_status(
+    db: Session,
+    direction: str,
+    product: str,
+    hour: int,
+    minute: int,
+    target_date: str | None = None,
+    station_id: str | None = None,
+) -> dict:
+    """Get the latest observation for a specific scheduled departure on the given date (default: today)."""
     tol = COMMUTE_TIME_TOLERANCE_MINUTES
     station_clause = "AND station_id = :station_id" if station_id else ""
+    date_clause = (
+        "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :target_date"
+        if target_date else
+        "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = CURRENT_DATE"
+    )
+    params: dict = {
+        "dir": direction,
+        "product": product,
+        "hour": hour,
+        "minute": minute,
+        "tol": tol,
+        "station_id": station_id,
+    }
+    if target_date:
+        params["target_date"] = target_date
+
     result = db.execute(
         text(f"""
             SELECT delay_seconds, cancelled, last_updated_at
@@ -35,7 +62,7 @@ def _today_status(db: Session, direction: str, product: str, hour: int, minute: 
             WHERE direction = :dir
               AND line_product = :product
               {station_clause}
-              AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = CURRENT_DATE
+              {date_clause}
               AND (
                 EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
                 EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
@@ -43,8 +70,7 @@ def _today_status(db: Session, direction: str, product: str, hour: int, minute: 
             ORDER BY last_updated_at DESC
             LIMIT 1
         """),
-        {"dir": direction, "product": product, "hour": hour, "minute": minute,
-         "tol": tol, "station_id": station_id},
+        params,
     )
     row = result.fetchone()
     if not row:
@@ -100,8 +126,22 @@ def _history(db: Session, direction: str, product: str, hour: int, minute: int, 
     }
 
 
+@router.get("/commute/earliest-date")
+def get_earliest_date(db: Session = Depends(get_db)):
+    """Return the earliest date for which observations exist — used for back-navigation boundary."""
+    result = db.execute(text("""
+        SELECT DATE(MIN(planned_time) AT TIME ZONE 'Europe/Vienna') AS earliest
+        FROM train_observations
+    """))
+    row = result.fetchone()
+    return {"earliest_date": row.earliest.isoformat() if row and row.earliest else None}
+
+
 @router.get("/commute/overview")
-def get_commute_overview(db: Session = Depends(get_db)):
+def get_commute_overview(
+    date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    db: Session = Depends(get_db),
+):
     morning = []
     for journey in MORNING_JOURNEYS:
         cjx_h, cjx_m = _parse_hhmm(journey["cjx_dep"])
@@ -116,7 +156,7 @@ def get_commute_overview(db: Session = Depends(get_db)):
                 "to_station": "Wien Meidling",
                 "line": "CJX",
                 "product": "regional",
-                "today": _today_status(db, "to_wien", "regional", cjx_h, cjx_m),
+                "today": _today_status(db, "to_wien", "regional", cjx_h, cjx_m, target_date=date),
                 "history_30d": _history(db, "to_wien", "regional", cjx_h, cjx_m),
             },
             "u6": {
@@ -126,7 +166,7 @@ def get_commute_overview(db: Session = Depends(get_db)):
                 "to_station": "Wien Westbahnhof",
                 "line": "U6",
                 "product": "subway",
-                "today": _today_status(db, "to_wien", "subway", u6_h, u6_m),
+                "today": _today_status(db, "to_wien", "subway", u6_h, u6_m, target_date=date),
                 "history_30d": _history(db, "to_wien", "subway", u6_h, u6_m),
             },
         })
@@ -143,7 +183,7 @@ def get_commute_overview(db: Session = Depends(get_db)):
             "to_station": "Wien Meidling",
             "line": "U6",
             "product": "subway",
-            "today": _today_status(db, "to_ternitz", "subway", u6_h, u6_m),
+            "today": _today_status(db, "to_ternitz", "subway", u6_h, u6_m, target_date=date),
             "history_30d": _history(db, "to_ternitz", "subway", u6_h, u6_m),
         },
         "cjx": {
@@ -153,9 +193,13 @@ def get_commute_overview(db: Session = Depends(get_db)):
             "to_station": "Ternitz",
             "line": "CJX",
             "product": "regional",
-            "today": _today_status(db, "to_ternitz", "regional", cjx_h, cjx_m),
+            "today": _today_status(db, "to_ternitz", "regional", cjx_h, cjx_m, target_date=date),
             "history_30d": _history(db, "to_ternitz", "regional", cjx_h, cjx_m),
         },
     }
 
-    return {"morning": morning, "evening": evening}
+    return {
+        "morning": morning,
+        "evening": evening,
+        "viewed_date": date or date_type.today().isoformat(),
+    }

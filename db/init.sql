@@ -6,6 +6,7 @@ CREATE TABLE stations (
 INSERT INTO stations (id, name) VALUES
     ('1131839', 'Ternitz'),
     ('1130165', 'Baden bei Wien'),
+    ('1130016', 'Wiener Neustadt Hbf'),
     ('1191201', 'Wien Meidling'),
     ('915006',  'Wien Westbahnhof (U6)');
 

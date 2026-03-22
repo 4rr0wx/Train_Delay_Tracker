@@ -264,9 +264,28 @@ body {
 /* ===================== TODAY TAB ===================== */
 .today-header {
   display: flex;
-  align-items: baseline;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+}
+.today-header-center {
+  flex: 1;
+  text-align: center;
+}
+.today-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.heute-reset-btn {
+  background: var(--red);
+  color: var(--white);
+  border-color: var(--red);
+}
+.heute-reset-btn:hover:not(:disabled) {
+  background: #c0001a;
+  border-color: #c0001a;
 }
 .today-date {
   font-size: 18px;
@@ -583,47 +602,55 @@ body {
 .page-indicator { font-size: 12px; color: var(--grey-500); min-width: 80px; text-align: center; }
 
 .journey-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  overflow-x: auto;
 }
 
-/* Journey row card */
-.journey-card {
+/* Journey table */
+.journey-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
   background: var(--white);
   border-radius: var(--radius-lg);
+  overflow: hidden;
   box-shadow: var(--shadow-sm);
-  padding: 14px 16px;
-  border-left: 4px solid var(--dark);
-  transition: box-shadow 0.15s;
 }
-.journey-card:hover { box-shadow: var(--shadow-md); }
-.journey-card.diverted { border-left-color: var(--orange); }
-.journey-card.cancelled { border-left-color: var(--red); opacity: 0.75; }
-
-.journey-card-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.journey-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.journey-time {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--dark);
-  font-variant-numeric: tabular-nums;
-}
-.journey-date {
+.journey-data-table th {
+  background: var(--grey-50);
+  padding: 9px 12px;
+  text-align: left;
+  font-weight: 600;
   font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--grey-500);
+  border-bottom: 2px solid var(--grey-200);
+  white-space: nowrap;
 }
+.journey-data-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--grey-100);
+  vertical-align: middle;
+}
+.journey-data-table tbody tr:last-child td { border-bottom: none; }
+.journey-data-table tbody tr:hover td { background: var(--grey-50); }
+.row-cancelled td { opacity: 0.6; }
+
+/* Delay cells */
+.delay-cell { text-align: center; font-weight: 600; white-space: nowrap; min-width: 60px; }
+.delay-cell.ok      { color: var(--green); }
+.delay-cell.warn    { color: var(--orange); }
+.delay-cell.bad     { color: var(--red); }
+.delay-cell.cancel  { color: var(--red); font-style: italic; }
+.delay-cell.recover { color: #0077cc; }   /* Zeitgewinn / Verspätungsabbau */
+.delay-cell.skipped,
+.delay-cell.unknown { color: var(--grey-400); font-style: italic; }
+
+/* Date / time columns */
+.col-date { font-size: 12px; color: var(--grey-500); white-space: nowrap; }
+.col-time { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Legacy journey badges (still referenced in HTML after card removal) */
 .journey-badges {
   display: flex;
   gap: 6px;
