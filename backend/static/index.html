@@ -139,6 +139,10 @@
         <h3>Morgen &rarr; Wien</h3>
         <span class="section-sub">Ternitz → Baden → Meidling → Westbahnhof</span>
       </div>
+      <div class="trip-selector-row" id="morning-selector-row" style="display:none">
+        <label class="trip-selector-label" for="morning-trip-select">Verbindung:</label>
+        <select class="trip-select" id="morning-trip-select" onchange="selectTrip('morning', parseInt(this.value))"></select>
+      </div>
       <div id="morning-cards" class="commute-cards"></div>
       <div id="morning-connection" class="connection-hint alert-banner" style="display:none"></div>
     </section>
@@ -149,6 +153,10 @@
         <span class="section-badge cjx-badge">CJX</span>
         <h3>Abend &rarr; Ternitz</h3>
         <span class="section-sub">Westbahnhof → Meidling → Baden → Ternitz</span>
+      </div>
+      <div class="trip-selector-row" id="evening-selector-row" style="display:none">
+        <label class="trip-selector-label" for="evening-trip-select">Verbindung:</label>
+        <select class="trip-select" id="evening-trip-select" onchange="selectTrip('evening', parseInt(this.value))"></select>
       </div>
       <div id="evening-cards" class="commute-cards"></div>
       <div id="evening-connection" class="connection-hint alert-banner" style="display:none"></div>

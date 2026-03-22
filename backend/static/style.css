@@ -348,6 +348,40 @@ body {
 .cjx-badge { background: var(--dark); color: var(--white); }
 .u6-badge { background: #8B2FC9; color: var(--white); }
 
+/* Trip selector row (Gleitzeit dropdown) */
+.trip-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--grey-200);
+  background: var(--grey-50, #fafafa);
+}
+.trip-selector-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--grey-600, #555);
+  white-space: nowrap;
+}
+.trip-select {
+  flex: 1;
+  max-width: 320px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dark);
+  background: var(--white);
+  border: 1px solid var(--grey-300, #ccc);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  appearance: auto;
+}
+.trip-select:focus {
+  outline: 2px solid var(--red);
+  outline-offset: 1px;
+}
+
 .commute-cards {
   padding: 12px 16px;
   display: flex;

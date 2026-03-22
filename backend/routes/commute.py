@@ -17,7 +17,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
-from config import MORNING_JOURNEYS, EVENING_JOURNEY, COMMUTE_TIME_TOLERANCE_MINUTES
+from config import (
+    MORNING_JOURNEYS, EVENING_JOURNEY, COMMUTE_TIME_TOLERANCE_MINUTES,
+    TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID,
+)
 
 router = APIRouter()
 
@@ -202,4 +205,149 @@ def get_commute_overview(
         "morning": morning,
         "evening": evening,
         "viewed_date": date or date_type.today().isoformat(),
+    }
+
+
+@router.get("/commute/trips")
+def get_commute_trips(
+    date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    db: Session = Depends(get_db),
+):
+    """
+    Dynamically return all observed CJX trips for a given date in both directions,
+    each paired with the nearest U6 connection.  Designed for flexible (Gleitzeit)
+    commuters who may take any train, not just fixed departure slots.
+    """
+    target_date = date or date_type.today().isoformat()
+    dc = "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :target_date"
+
+    def _all_cjx(direction: str, anchor_station_id: str) -> list:
+        return db.execute(
+            text(f"""
+                SELECT
+                    TO_CHAR(MIN(planned_time) AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
+                    EXTRACT(HOUR   FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
+                    EXTRACT(MINUTE FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_minute
+                FROM train_observations
+                WHERE direction       = :dir
+                  AND line_product    = 'regional'
+                  AND station_id      = :station_id
+                  {dc}
+                GROUP BY
+                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna'),
+                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
+                ORDER BY dep_hour, dep_minute
+            """),
+            {"target_date": target_date, "dir": direction, "station_id": anchor_station_id},
+        ).fetchall()
+
+    def _nearest_u6(direction: str, station_id: str, min_start: int, min_end: int):
+        return db.execute(
+            text(f"""
+                SELECT
+                    TO_CHAR(MIN(planned_time) AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
+                    EXTRACT(HOUR   FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
+                    EXTRACT(MINUTE FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_minute
+                FROM train_observations
+                WHERE direction    = :dir
+                  AND line_product = 'subway'
+                  AND station_id   = :station_id
+                  {dc}
+                  AND (
+                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
+                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
+                  ) BETWEEN :min_start AND :min_end
+                GROUP BY
+                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna'),
+                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
+                ORDER BY dep_hour, dep_minute
+                LIMIT 1
+            """),
+            {
+                "target_date": target_date, "dir": direction,
+                "station_id": station_id,
+                "min_start": min_start, "min_end": min_end,
+            },
+        ).fetchone()
+
+    # ── MORNING: CJX to_wien (anchor = Ternitz) ──────────────────────────
+    morning = []
+    for row in _all_cjx("to_wien", TERNITZ_STATION_ID):
+        h, m = row.dep_hour, row.dep_minute
+        cjx_dep_min = h * 60 + m
+        # U6 from Meidling: roughly 40–80 min after CJX leaves Ternitz
+        u6_row = _nearest_u6("to_wien", WIEN_MEIDLING_STATION_ID,
+                              cjx_dep_min + 40, cjx_dep_min + 80)
+        trip: dict = {
+            "cjx_dep": row.dep_time,
+            "cjx": {
+                "planned_departure": row.dep_time,
+                "direction": "to_wien",
+                "from_station": "Ternitz",
+                "to_station": "Wien Meidling",
+                "line": "CJX",
+                "product": "regional",
+                "today": _today_status(db, "to_wien", "regional", h, m, target_date=target_date),
+                "history_30d": _history(db, "to_wien", "regional", h, m),
+            },
+            "u6_dep": None,
+            "u6": None,
+        }
+        if u6_row:
+            u6h, u6m = u6_row.dep_hour, u6_row.dep_minute
+            trip["u6_dep"] = u6_row.dep_time
+            trip["u6"] = {
+                "planned_departure": u6_row.dep_time,
+                "direction": "to_wien",
+                "from_station": "Wien Meidling",
+                "to_station": "Wien Westbahnhof",
+                "line": "U6",
+                "product": "subway",
+                "today": _today_status(db, "to_wien", "subway", u6h, u6m, target_date=target_date),
+                "history_30d": _history(db, "to_wien", "subway", u6h, u6m),
+            }
+        morning.append(trip)
+
+    # ── EVENING: CJX to_ternitz (anchor = Wien Meidling) ─────────────────
+    evening = []
+    for row in _all_cjx("to_ternitz", WIEN_MEIDLING_STATION_ID):
+        h, m = row.dep_hour, row.dep_minute
+        cjx_dep_min = h * 60 + m
+        # U6 from Westbahnhof: roughly 5–30 min BEFORE CJX leaves Meidling
+        u6_row = _nearest_u6("to_ternitz", WIEN_WESTBAHNHOF_STATION_ID,
+                              cjx_dep_min - 30, cjx_dep_min - 5)
+        trip = {
+            "cjx_dep": row.dep_time,
+            "cjx": {
+                "planned_departure": row.dep_time,
+                "direction": "to_ternitz",
+                "from_station": "Wien Meidling",
+                "to_station": "Ternitz",
+                "line": "CJX",
+                "product": "regional",
+                "today": _today_status(db, "to_ternitz", "regional", h, m, target_date=target_date),
+                "history_30d": _history(db, "to_ternitz", "regional", h, m),
+            },
+            "u6_dep": None,
+            "u6": None,
+        }
+        if u6_row:
+            u6h, u6m = u6_row.dep_hour, u6_row.dep_minute
+            trip["u6_dep"] = u6_row.dep_time
+            trip["u6"] = {
+                "planned_departure": u6_row.dep_time,
+                "direction": "to_ternitz",
+                "from_station": "Wien Westbahnhof",
+                "to_station": "Wien Meidling",
+                "line": "U6",
+                "product": "subway",
+                "today": _today_status(db, "to_ternitz", "subway", u6h, u6m, target_date=target_date),
+                "history_30d": _history(db, "to_ternitz", "subway", u6h, u6m),
+            }
+        evening.append(trip)
+
+    return {
+        "morning": morning,
+        "evening": evening,
+        "viewed_date": target_date,
     }
