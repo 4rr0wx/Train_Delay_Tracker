@@ -4,7 +4,7 @@ from sqlalchemy import text
 from typing import Optional
 
 from database import get_db
-from config import TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID, BADEN_STATION_ID
+from config import TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID, BADEN_STATION_ID, WIENER_NEUSTADT_STATION_ID
 
 router = APIRouter()
 
@@ -221,6 +221,7 @@ def get_delays_by_station(
     if direction == "to_wien":
         stations = [
             (TERNITZ_STATION_ID, "Ternitz", "regional"),
+            (WIENER_NEUSTADT_STATION_ID, "Wiener Neustadt", "regional"),
             (BADEN_STATION_ID, "Baden bei Wien", "regional"),
             (WIEN_MEIDLING_STATION_ID, "Wien Meidling (CJX)", "regional"),
             (WIEN_MEIDLING_STATION_ID, "Wien Meidling (U6)", "subway"),
@@ -232,6 +233,7 @@ def get_delays_by_station(
             (WIEN_MEIDLING_STATION_ID, "Wien Meidling (U6)", "subway"),
             (WIEN_MEIDLING_STATION_ID, "Wien Meidling (CJX)", "regional"),
             (BADEN_STATION_ID, "Baden bei Wien", "regional"),
+            (WIENER_NEUSTADT_STATION_ID, "Wiener Neustadt", "regional"),
             (TERNITZ_STATION_ID, "Ternitz", "regional"),
         ]
 

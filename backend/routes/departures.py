@@ -4,7 +4,7 @@ from sqlalchemy import text
 from typing import Optional
 
 from database import get_db
-from config import TERNITZ_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID
+from config import TERNITZ_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID, WIEN_MEIDLING_STATION_ID
 
 router = APIRouter()
 
@@ -28,12 +28,13 @@ def get_departures(
     elif status == "cancelled":
         sc = "AND cancelled = TRUE"
 
-    # Show only departure-station observations to avoid triple-counting the same trip.
-    # CJX to_wien is observed at Ternitz, Baden AND Meidling → keep only Ternitz (origin).
-    # CJX to_ternitz is observed at Westbahnhof AND Meidling → keep only Westbahnhof (origin).
-    departure_station_id = (
-        TERNITZ_STATION_ID if direction == "to_wien" else WIEN_WESTBAHNHOF_STATION_ID
-    )
+    # Show only origin-station observations to avoid counting intermediate stops.
+    # to_wien:    CJX origin = Ternitz
+    # to_ternitz: U6 origin = Westbahnhof, CJX origin = Wien Meidling
+    if direction == "to_wien":
+        origin_stations = [TERNITZ_STATION_ID]
+    else:
+        origin_stations = [WIEN_WESTBAHNHOF_STATION_ID, WIEN_MEIDLING_STATION_ID]
 
     result = db.execute(
         text(f"""
@@ -50,14 +51,14 @@ def get_departures(
                 station_id
             FROM train_observations
             WHERE direction = :direction
-              AND station_id = :departure_station_id
+              AND station_id = ANY(:origin_stations)
               {pc}
               {sc}
             ORDER BY planned_time DESC
             LIMIT :limit
         """),
         {"direction": direction, "limit": limit, "product": product,
-         "departure_station_id": departure_station_id},
+         "origin_stations": origin_stations},
     )
 
     rows = result.fetchall()

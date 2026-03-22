@@ -83,7 +83,7 @@ def _is_u6(item: dict) -> bool:
 # CJX Wien-bound: trains going to Wien or Laa an der Thaya (via Wien)
 # Exclude short-turns to Wr. Neustadt and southbound trains to Payerbach
 _WIEN_BOUND_KEYWORDS = {"wien", "laa"}
-_NOT_WIEN_BOUND_KEYWORDS = {"payerbach", "reichenau"}
+_NOT_WIEN_BOUND_KEYWORDS = {"payerbach", "reichenau", "wiener neustadt"}
 
 
 def _cjx_is_wien_bound(item: dict) -> bool:
@@ -91,6 +91,30 @@ def _cjx_is_wien_bound(item: dict) -> bool:
     if any(kw in dest for kw in _NOT_WIEN_BOUND_KEYWORDS):
         return False
     return any(kw in dest for kw in _WIEN_BOUND_KEYWORDS)
+
+
+# For arrivals: provenance = where the train CAME FROM (inverted logic).
+# Came from south → heading to Wien; came from Wien → heading to Ternitz.
+_SOUTH_ORIGIN_KEYWORDS = {"payerbach", "reichenau", "ternitz", "semmering"}
+_WIEN_ORIGIN_KEYWORDS = {"wien", "laa"}
+_NOT_WIEN_ORIGIN_KEYWORDS = {"wiener neustadt"}  # "wien" substring guard
+
+
+def _cjx_arrival_is_wien_bound(item: dict) -> bool:
+    """For CJX arrivals at intermediate stations: is this train heading to Wien?
+
+    Uses provenance (origin) to decide — logic is inverted vs departures:
+      provenance from south (Payerbach/Ternitz) → heading to Wien = True
+      provenance from Wien/Laa              → heading to Ternitz = False
+    """
+    prov = (item.get("provenance") or item.get("direction") or "").lower()
+    if any(kw in prov for kw in _SOUTH_ORIGIN_KEYWORDS):
+        return True   # came from south → heading to Wien
+    if any(kw in prov for kw in _NOT_WIEN_ORIGIN_KEYWORDS):
+        return False  # "wiener neustadt" is NOT Wien
+    if any(kw in prov for kw in _WIEN_ORIGIN_KEYWORDS):
+        return False  # came from Wien → heading to Ternitz
+    return False      # unknown → skip
 
 
 # U6 direction at Wien Meidling
@@ -190,10 +214,11 @@ def collect_data():
             if o:
                 obs.append(o)
 
-    # to_ternitz: CJX arrivals at Wiener Neustadt (coming from Wien direction)
+    # CJX arrivals at Wiener Neustadt — direction based on provenance
     for item in _get(WIENER_NEUSTADT_STATION_ID, "arrivals"):
         if _is_cjx(item):
-            o = _parse(item, WIENER_NEUSTADT_STATION_ID, "to_ternitz")
+            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
+            o = _parse(item, WIENER_NEUSTADT_STATION_ID, direction)
             if o:
                 obs.append(o)
 
@@ -208,10 +233,11 @@ def collect_data():
             if o:
                 obs.append(o)
 
-    # to_ternitz: CJX arrivals at Baden (coming from Wien direction)
+    # CJX arrivals at Baden — direction based on provenance
     for item in _get(BADEN_STATION_ID, "arrivals"):
         if _is_cjx(item):
-            o = _parse(item, BADEN_STATION_ID, "to_ternitz")
+            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
+            o = _parse(item, BADEN_STATION_ID, direction)
             if o:
                 obs.append(o)
 
@@ -238,10 +264,11 @@ def collect_data():
     # CJX at Wien Meidling (track delay buildup during the journey)
     # -----------------------------------------------------------------------
 
-    # to_wien: CJX arriving at Wien Meidling from Ternitz direction
+    # CJX arrivals at Wien Meidling — direction based on provenance
     for item in _get(WIEN_MEIDLING_STATION_ID, "arrivals"):
         if _is_cjx(item):
-            o = _parse(item, WIEN_MEIDLING_STATION_ID, "to_wien")
+            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
+            o = _parse(item, WIEN_MEIDLING_STATION_ID, direction)
             if o:
                 obs.append(o)
 
