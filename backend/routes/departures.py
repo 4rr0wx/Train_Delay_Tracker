@@ -17,16 +17,16 @@ def get_departures(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    pc = "AND line_product = :product" if product else ""
+    pc = "AND t.line_product = :product" if product else ""
 
     # Status filter: on_time (<60s delay), delayed (>=60s), cancelled
     sc = ""
     if status == "on_time":
-        sc = "AND cancelled = FALSE AND (delay_seconds IS NULL OR delay_seconds < 60)"
+        sc = "AND t.cancelled = FALSE AND (t.delay_seconds IS NULL OR t.delay_seconds < 60)"
     elif status == "delayed":
-        sc = "AND cancelled = FALSE AND delay_seconds IS NOT NULL AND delay_seconds >= 60"
+        sc = "AND t.cancelled = FALSE AND t.delay_seconds IS NOT NULL AND t.delay_seconds >= 60"
     elif status == "cancelled":
-        sc = "AND cancelled = TRUE"
+        sc = "AND t.cancelled = TRUE"
 
     # Show only origin-station observations to avoid counting intermediate stops.
     # to_wien:    CJX origin = Ternitz
@@ -36,24 +36,33 @@ def get_departures(
     else:
         origin_stations = [WIEN_WESTBAHNHOF_STATION_ID, WIEN_MEIDLING_STATION_ID]
 
+    # DISTINCT ON deduplicates: if the same trip has both an arrival and a departure
+    # row at the same station (legacy data), keep only the departure (latest planned_time).
+    # Wrapped in subquery so we can re-sort by planned_time and apply LIMIT.
     result = db.execute(
         text(f"""
-            SELECT
-                trip_id,
-                line_name,
-                line_product,
-                destination,
-                planned_time,
-                actual_time,
-                delay_seconds,
-                cancelled,
-                platform,
-                station_id
-            FROM train_observations
-            WHERE direction = :direction
-              AND station_id = ANY(:origin_stations)
-              {pc}
-              {sc}
+            SELECT * FROM (
+                SELECT DISTINCT ON (t.trip_id)
+                    t.trip_id,
+                    t.train_number,
+                    t.line_name,
+                    t.line_product,
+                    t.destination,
+                    t.planned_time,
+                    t.actual_time,
+                    t.delay_seconds,
+                    t.cancelled,
+                    t.platform,
+                    t.station_id,
+                    s.name AS station_name
+                FROM train_observations t
+                LEFT JOIN stations s ON s.id = t.station_id
+                WHERE t.direction = :direction
+                  AND t.station_id = ANY(:origin_stations)
+                  {pc}
+                  {sc}
+                ORDER BY t.trip_id, t.planned_time DESC
+            ) sub
             ORDER BY planned_time DESC
             LIMIT :limit
         """),
@@ -65,6 +74,7 @@ def get_departures(
     return [
         {
             "trip_id": r.trip_id,
+            "train_number": r.train_number,
             "line_name": r.line_name,
             "line_product": r.line_product,
             "destination": r.destination,
@@ -75,6 +85,7 @@ def get_departures(
             "cancelled": r.cancelled,
             "platform": r.platform,
             "station_id": r.station_id,
+            "station_name": r.station_name,
         }
         for r in rows
     ]

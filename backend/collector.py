@@ -138,6 +138,7 @@ def _parse(item: dict, station_id: str, direction: str) -> dict | None:
         "trip_id": trip_id,
         "station_id": station_id,
         "direction": direction,
+        "train_number": line.get("fahrtNr"),
         "line_name": line.get("name"),
         "line_product": line.get("product"),
         "destination": item.get("direction") or (item.get("destination") or {}).get("name"),
@@ -165,6 +166,7 @@ def _upsert(observations: list[dict]):
                     "cancelled": stmt.excluded.cancelled,
                     "platform": stmt.excluded.platform,
                     "remarks": stmt.excluded.remarks,
+                    "train_number": stmt.excluded.train_number,
                     "last_updated_at": datetime.utcnow(),
                 },
             )
@@ -214,11 +216,12 @@ def collect_data():
             if o:
                 obs.append(o)
 
-    # CJX arrivals at Wiener Neustadt — direction based on provenance
+    # to_ternitz: CJX arrivals at Wiener Neustadt (from Wien direction)
+    # NOTE: to_wien is already covered by departures above — only capture to_ternitz
+    # to avoid duplicate rows (arrival vs departure have different planned_time).
     for item in _get(WIENER_NEUSTADT_STATION_ID, "arrivals"):
-        if _is_cjx(item):
-            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
-            o = _parse(item, WIENER_NEUSTADT_STATION_ID, direction)
+        if _is_cjx(item) and not _cjx_arrival_is_wien_bound(item):
+            o = _parse(item, WIENER_NEUSTADT_STATION_ID, "to_ternitz")
             if o:
                 obs.append(o)
 
@@ -233,11 +236,11 @@ def collect_data():
             if o:
                 obs.append(o)
 
-    # CJX arrivals at Baden — direction based on provenance
+    # to_ternitz: CJX arrivals at Baden (from Wien direction)
+    # NOTE: to_wien is already covered by departures above — only capture to_ternitz.
     for item in _get(BADEN_STATION_ID, "arrivals"):
-        if _is_cjx(item):
-            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
-            o = _parse(item, BADEN_STATION_ID, direction)
+        if _is_cjx(item) and not _cjx_arrival_is_wien_bound(item):
+            o = _parse(item, BADEN_STATION_ID, "to_ternitz")
             if o:
                 obs.append(o)
 
@@ -264,11 +267,12 @@ def collect_data():
     # CJX at Wien Meidling (track delay buildup during the journey)
     # -----------------------------------------------------------------------
 
-    # CJX arrivals at Wien Meidling — direction based on provenance
+    # to_wien: CJX arriving at Wien Meidling from Ternitz direction
+    # NOTE: to_ternitz is already covered by CJX departures below — only capture
+    # to_wien arrivals to avoid duplicate rows for the same train.
     for item in _get(WIEN_MEIDLING_STATION_ID, "arrivals"):
-        if _is_cjx(item):
-            direction = "to_wien" if _cjx_arrival_is_wien_bound(item) else "to_ternitz"
-            o = _parse(item, WIEN_MEIDLING_STATION_ID, direction)
+        if _is_cjx(item) and _cjx_arrival_is_wien_bound(item):
+            o = _parse(item, WIEN_MEIDLING_STATION_ID, "to_wien")
             if o:
                 obs.append(o)
 
