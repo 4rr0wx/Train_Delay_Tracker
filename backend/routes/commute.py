@@ -20,6 +20,7 @@ from database import get_db
 from config import (
     MORNING_JOURNEYS, EVENING_JOURNEY, COMMUTE_TIME_TOLERANCE_MINUTES,
     TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID,
+    WIENER_NEUSTADT_STATION_ID, BADEN_STATION_ID,
 )
 
 router = APIRouter()
@@ -126,6 +127,55 @@ def _history(db: Session, direction: str, product: str, hour: int, minute: int, 
         "cancellation_rate_pct": round((row.cancelled_count or 0) / total * 100, 1) if total > 0 else 0,
         "avg_delay_minutes": round(float(row.avg_delay) / 60, 1) if row.avg_delay else 0,
         "on_time_pct": round((row.on_time_count or 0) / non_cancelled * 100, 1) if non_cancelled > 0 else 0,
+    }
+
+
+def _get_trip_id(
+    db: Session, direction: str, product: str, station_id: str,
+    hour: int, minute: int, target_date: str,
+) -> str | None:
+    """Return the trip_id of the train matching a departure slot on a given date."""
+    tol = COMMUTE_TIME_TOLERANCE_MINUTES
+    row = db.execute(
+        text("""
+            SELECT trip_id FROM train_observations
+            WHERE direction = :dir AND line_product = :product
+              AND station_id = :sid
+              AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :date
+              AND (
+                EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
+                EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
+              ) BETWEEN :t - :tol AND :t + :tol
+            ORDER BY last_updated_at DESC LIMIT 1
+        """),
+        {"dir": direction, "product": product, "sid": station_id,
+         "date": target_date, "t": hour * 60 + minute, "tol": tol},
+    ).fetchone()
+    return row.trip_id if row else None
+
+
+def _trip_station(db: Session, trip_id: str | None, station_id: str, direction: str) -> dict:
+    """Return delay status for a specific trip (by trip_id) at an intermediate station."""
+    _empty = {"seen": False, "delay_seconds": None, "delay_minutes": None, "cancelled": None}
+    if not trip_id:
+        return _empty
+    row = db.execute(
+        text("""
+            SELECT delay_seconds, cancelled FROM train_observations
+            WHERE trip_id = :tid AND station_id = :sid AND direction = :dir
+              AND line_product = 'regional'
+            ORDER BY last_updated_at DESC LIMIT 1
+        """),
+        {"tid": trip_id, "sid": station_id, "dir": direction},
+    ).fetchone()
+    if not row:
+        return _empty
+    ds = row.delay_seconds
+    return {
+        "seen": True,
+        "delay_seconds": ds,
+        "delay_minutes": round(ds / 60, 1) if ds is not None else 0,
+        "cancelled": row.cancelled,
     }
 
 
@@ -278,6 +328,8 @@ def get_commute_trips(
         # U6 from Meidling: roughly 40–80 min after CJX leaves Ternitz
         u6_row = _nearest_u6("to_wien", WIEN_MEIDLING_STATION_ID,
                               cjx_dep_min + 40, cjx_dep_min + 80)
+        # Intermediate station data via trip_id
+        tid = _get_trip_id(db, "to_wien", "regional", TERNITZ_STATION_ID, h, m, target_date)
         trip: dict = {
             "cjx_dep": row.dep_time,
             "cjx": {
@@ -290,6 +342,9 @@ def get_commute_trips(
                 "today": _today_status(db, "to_wien", "regional", h, m, target_date=target_date),
                 "history_30d": _history(db, "to_wien", "regional", h, m),
             },
+            "wiener_neustadt": _trip_station(db, tid, WIENER_NEUSTADT_STATION_ID, "to_wien"),
+            "baden": _trip_station(db, tid, BADEN_STATION_ID, "to_wien"),
+            "meidling_cjx": _trip_station(db, tid, WIEN_MEIDLING_STATION_ID, "to_wien"),
             "u6_dep": None,
             "u6": None,
         }
@@ -316,6 +371,8 @@ def get_commute_trips(
         # U6 from Westbahnhof: roughly 5–30 min BEFORE CJX leaves Meidling
         u6_row = _nearest_u6("to_ternitz", WIEN_WESTBAHNHOF_STATION_ID,
                               cjx_dep_min - 30, cjx_dep_min - 5)
+        # Intermediate station data via trip_id
+        tid = _get_trip_id(db, "to_ternitz", "regional", WIEN_MEIDLING_STATION_ID, h, m, target_date)
         trip = {
             "cjx_dep": row.dep_time,
             "cjx": {
@@ -328,6 +385,9 @@ def get_commute_trips(
                 "today": _today_status(db, "to_ternitz", "regional", h, m, target_date=target_date),
                 "history_30d": _history(db, "to_ternitz", "regional", h, m),
             },
+            "wiener_neustadt": _trip_station(db, tid, WIENER_NEUSTADT_STATION_ID, "to_ternitz"),
+            "baden": _trip_station(db, tid, BADEN_STATION_ID, "to_ternitz"),
+            "ternitz": _trip_station(db, tid, TERNITZ_STATION_ID, "to_ternitz"),
             "u6_dep": None,
             "u6": None,
         }

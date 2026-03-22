@@ -504,80 +504,86 @@ function legCard(train) {
 }
 
 // Journey card groups two legs (CJX + optional U6) with a full station timeline
+// Render a single station stop in the timeline using intermediate station data from API.
+function _stStop(label, data, forceDelay = null, extraCls = "") {
+  const seen = data?.seen;
+  const ds = data?.delay_seconds;
+  let cls;
+  if (!seen) {
+    cls = "unknown";
+  } else if (data.cancelled) {
+    cls = "cancel";
+  } else if (ds === null || ds === undefined) {
+    cls = "ok";
+  } else if (ds < 60)  { cls = "ok"; }
+  else if (ds < 300)   { cls = "warn"; }
+  else                 { cls = "bad"; }
+  const delayTxt = forceDelay ?? (
+    !seen ? "—"
+    : data.cancelled ? "AUSFALL"
+    : ds === null || ds === undefined ? "0 Min"
+    : `${ds > 0 ? "+" : ""}${Math.round(ds / 60)} Min`
+  );
+  return `<div class="st-stop${extraCls ? " " + extraCls : ""}">
+    <div class="st-dot ${cls}"></div>
+    <div class="st-label">${label}</div>
+    <div class="st-delay ${seen ? cls : ''}">${delayTxt}</div>
+  </div>`;
+}
+
 function journeyCommuteCard(journey, isEvening = false) {
   const cjx = journey.cjx;
   const u6  = journey.u6;  // may be null when no U6 connection was found
 
-  const cjxDs = cjx.today.delay_seconds;
-  const u6Ds  = u6 ? u6.today.delay_seconds : null;
-  const cjxCls = stationDelayClass(cjxDs);
+  const cjxDs  = cjx.today.delay_seconds;
+  const u6Ds   = u6 ? u6.today.delay_seconds : null;
   const u6Cls  = u6 ? stationDelayClass(u6Ds) : "unknown";
 
-  function delayText(ds, seen) {
-    if (!seen || ds === null || ds === undefined) return "—";
-    return (ds >= 0 ? `+${Math.round(ds / 60)}` : `${Math.round(ds / 60)}`) + " Min";
-  }
+  // Anchor station data objects (adapt _stStop format)
+  const ternitzData    = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
+  const westbhfData    = u6 ? { seen: u6.today.seen_today, delay_seconds: u6Ds, cancelled: u6.today.cancelled } : { seen: false };
+  const meidlingData   = journey.meidling_cjx || { seen: false };
+
+  // Intermediate station data from API
+  const wnData     = journey.wiener_neustadt || { seen: false };
+  const badenData  = journey.baden           || { seen: false };
+  const ternitzArrData = journey.ternitz     || ternitzData;
 
   let timeline;
   if (!isEvening) {
-    // Morning: Ternitz → Baden → Meidling ~~transfer~~ Meidling → Westbahnhof
+    // Morning: Ternitz → Wr.Neustadt → Baden → Meidling ~~transfer~~ Westbahnhof
+    const meidlingStop = _stStop("Meidling", meidlingData, u6 ? "Umstieg" : null, u6 ? "st-transfer" : "");
     const u6Part = u6 ? `
         <div class="st-line st-line-transfer"></div>
-        <div class="st-stop">
-          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
-          <div class="st-label">Westbhf</div>
-          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
-        </div>` : "";
+        ${_stStop("Westbhf", westbhfData)}` : "";
     timeline = `
       <div class="station-timeline">
-        <div class="st-stop">
-          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
-          <div class="st-label">Ternitz</div>
-          <div class="st-delay ${cjx.today.seen_today ? cjxCls : ''}">${delayText(cjxDs, cjx.today.seen_today)}</div>
-        </div>
+        ${_stStop("Ternitz", ternitzData)}
         <div class="st-line"></div>
-        <div class="st-stop">
-          <div class="st-dot unknown"></div>
-          <div class="st-label">Baden</div>
-          <div class="st-delay">—</div>
-        </div>
+        ${_stStop("Wr. Neustadt", wnData)}
         <div class="st-line"></div>
-        <div class="st-stop ${u6 ? 'st-transfer' : ''}">
-          <div class="st-dot unknown"></div>
-          <div class="st-label">Meidling</div>
-          <div class="st-delay">${u6 ? "Umstieg" : "—"}</div>
-        </div>
+        ${_stStop("Baden", badenData)}
+        <div class="st-line"></div>
+        ${meidlingStop}
         ${u6Part}
       </div>`;
   } else {
-    // Evening: (Westbahnhof →) Meidling → Baden → Ternitz
+    // Evening: Westbahnhof ~~transfer~~ Meidling → Baden → Wr.Neustadt → Ternitz
     const u6Part = u6 ? `
-        <div class="st-stop">
-          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
-          <div class="st-label">Westbhf</div>
-          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
-        </div>
+        ${_stStop("Westbhf", westbhfData)}
         <div class="st-line"></div>
-        <div class="st-stop st-transfer">
-          <div class="st-dot unknown"></div>
-          <div class="st-label">Meidling</div>
-          <div class="st-delay">Umstieg</div>
-        </div>
+        ${_stStop("Meidling", { seen: false }, "Umstieg", "st-transfer")}
         <div class="st-line st-line-transfer"></div>` : "";
+    // Anchor CJX data is for Meidling departure; use as fallback only
+    const cjxAnchorData = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
     timeline = `
       <div class="station-timeline">
         ${u6Part}
-        <div class="st-stop">
-          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
-          <div class="st-label">${u6 ? "Baden" : "Meidling"}</div>
-          <div class="st-delay">—</div>
-        </div>
+        ${_stStop("Baden", badenData)}
         <div class="st-line"></div>
-        <div class="st-stop">
-          <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
-          <div class="st-label">Ternitz</div>
-          <div class="st-delay ${cjx.today.seen_today ? cjxCls : ''}">${delayText(cjxDs, cjx.today.seen_today)}</div>
-        </div>
+        ${_stStop("Wr. Neustadt", wnData)}
+        <div class="st-line"></div>
+        ${_stStop("Ternitz", ternitzArrData)}
       </div>`;
   }
 
@@ -691,7 +697,7 @@ function renderJourneyTable(journeys, direction) {
     </tr>`;
   }).join("");
 
-  return `<table class="journey-data-table"><${thead}<tbody>${rows}</tbody></table>`;
+  return `<table class="journey-data-table">${thead}<tbody>${rows}</tbody></table>`;
 }
 
 // ============================================================
