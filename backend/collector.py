@@ -19,6 +19,7 @@ from config import (
     TERNITZ_STATION_ID,
     WIEN_MEIDLING_STATION_ID,
     WIEN_WESTBAHNHOF_STATION_ID,
+    BADEN_STATION_ID,
     POLL_DURATION_MINUTES,
     RELEVANT_TRAIN_LINE,
     RELEVANT_SUBWAY_LINE,
@@ -173,6 +174,24 @@ def collect_data():
     for item in _get(TERNITZ_STATION_ID, "arrivals"):
         if _is_cjx(item):
             o = _parse(item, TERNITZ_STATION_ID, "to_ternitz")
+            if o:
+                obs.append(o)
+
+    # -----------------------------------------------------------------------
+    # LEG 1b: CJX at Baden bei Wien (intermediate stop, diversion detection)
+    # -----------------------------------------------------------------------
+
+    # to_wien: CJX departures from Baden towards Wien
+    for item in _get(BADEN_STATION_ID, "departures"):
+        if _is_cjx(item) and _cjx_is_wien_bound(item):
+            o = _parse(item, BADEN_STATION_ID, "to_wien")
+            if o:
+                obs.append(o)
+
+    # to_ternitz: CJX arrivals at Baden (coming from Wien direction)
+    for item in _get(BADEN_STATION_ID, "arrivals"):
+        if _is_cjx(item):
+            o = _parse(item, BADEN_STATION_ID, "to_ternitz")
             if o:
                 obs.append(o)
 
