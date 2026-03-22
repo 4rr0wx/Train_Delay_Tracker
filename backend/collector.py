@@ -138,6 +138,7 @@ def _parse(item: dict, station_id: str, direction: str) -> dict | None:
         "trip_id": trip_id,
         "station_id": station_id,
         "direction": direction,
+        "train_number": line.get("fahrtNr"),
         "line_name": line.get("name"),
         "line_product": line.get("product"),
         "destination": item.get("direction") or (item.get("destination") or {}).get("name"),
@@ -165,6 +166,7 @@ def _upsert(observations: list[dict]):
                     "cancelled": stmt.excluded.cancelled,
                     "platform": stmt.excluded.platform,
                     "remarks": stmt.excluded.remarks,
+                    "train_number": stmt.excluded.train_number,
                     "last_updated_at": datetime.utcnow(),
                 },
             )

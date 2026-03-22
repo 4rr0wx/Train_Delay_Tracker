@@ -15,6 +15,7 @@ CREATE TABLE train_observations (
     trip_id VARCHAR(255) NOT NULL,
     station_id VARCHAR(20) REFERENCES stations(id),
     direction VARCHAR(10) NOT NULL CHECK (direction IN ('to_wien', 'to_ternitz')),
+    train_number VARCHAR(50),
     line_name VARCHAR(100),
     line_product VARCHAR(50),
     destination VARCHAR(200),
@@ -34,3 +35,8 @@ CREATE INDEX idx_obs_planned_time ON train_observations(planned_time);
 CREATE INDEX idx_obs_direction_time ON train_observations(direction, planned_time);
 CREATE INDEX idx_obs_cancelled ON train_observations(cancelled);
 CREATE INDEX idx_obs_line_product ON train_observations(line_product);
+CREATE INDEX idx_obs_train_number ON train_observations(train_number);
+
+-- Migration for existing databases:
+-- ALTER TABLE train_observations ADD COLUMN IF NOT EXISTS train_number VARCHAR(50);
+-- CREATE INDEX IF NOT EXISTS idx_obs_train_number ON train_observations(train_number);

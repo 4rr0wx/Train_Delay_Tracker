@@ -44,6 +44,7 @@ def get_departures(
             SELECT * FROM (
                 SELECT DISTINCT ON (t.trip_id)
                     t.trip_id,
+                    t.train_number,
                     t.line_name,
                     t.line_product,
                     t.destination,
@@ -73,6 +74,7 @@ def get_departures(
     return [
         {
             "trip_id": r.trip_id,
+            "train_number": r.train_number,
             "line_name": r.line_name,
             "line_product": r.line_product,
             "destination": r.destination,

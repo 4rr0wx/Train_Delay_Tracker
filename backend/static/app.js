@@ -952,6 +952,7 @@ async function loadDepartures() {
       return `<tr>
         <td>${row.planned_time ? new Date(row.planned_time).toLocaleTimeString("de-AT",{hour:"2-digit",minute:"2-digit"}) : "—"}</td>
         <td>${lineBadge}</td>
+        <td>${row.train_number || "—"}</td>
         <td>${row.station_name || "—"}</td>
         <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${row.destination || "—"}</td>
         <td class="${statusCls}">${statusTxt}</td>

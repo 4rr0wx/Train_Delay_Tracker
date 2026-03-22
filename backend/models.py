@@ -18,6 +18,7 @@ class TrainObservation(Base):
     trip_id = Column(String(255), nullable=False)
     station_id = Column(String(20), ForeignKey("stations.id"))
     direction = Column(String(10), nullable=False)
+    train_number = Column(String(50))
     line_name = Column(String(100))
     line_product = Column(String(50))
     destination = Column(String(200))
