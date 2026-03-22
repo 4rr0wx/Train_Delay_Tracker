@@ -384,10 +384,55 @@ main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
     margin-bottom: 1.5rem;
 }
 
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 0.8rem;
+}
+
 .table-section h3 {
     font-size: 0.95rem;
     color: var(--text-muted);
-    margin-bottom: 0.8rem;
+    margin-bottom: 0;
+}
+
+.table-filters {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.filter-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-right: 0.2rem;
+}
+
+.filter-btn {
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    border-radius: 5px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.filter-btn:hover { border-color: var(--primary); color: var(--primary); }
+.filter-btn.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
 }
 
 .table-wrapper { overflow-x: auto; }

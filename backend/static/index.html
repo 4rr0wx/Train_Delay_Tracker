@@ -179,14 +179,31 @@
 
             <!-- Departures table -->
             <section class="table-section">
-                <h3>Letzte Abfahrten &amp; Ankünfte</h3>
+                <div class="table-header">
+                    <h3>Letzte Abfahrten &amp; Ankünfte</h3>
+                    <div class="table-filters">
+                        <div class="filter-group">
+                            <span class="filter-label">Linie:</span>
+                            <button class="filter-btn active" onclick="setProductFilter(null)">Alle</button>
+                            <button class="filter-btn" onclick="setProductFilter('regional')">CJX</button>
+                            <button class="filter-btn" onclick="setProductFilter('subway')">U6</button>
+                        </div>
+                        <div class="filter-group">
+                            <span class="filter-label">Status:</span>
+                            <button class="filter-btn active" onclick="setStatusFilter(null)">Alle</button>
+                            <button class="filter-btn" onclick="setStatusFilter('on_time')">Pünktlich</button>
+                            <button class="filter-btn" onclick="setStatusFilter('delayed')">Verspätet</button>
+                            <button class="filter-btn" onclick="setStatusFilter('cancelled')">Ausfall</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="table-wrapper">
                     <table>
                         <thead>
                             <tr>
                                 <th>Datum/Zeit</th>
                                 <th>Linie</th>
-                                <th>Typ</th>
+                                <th>Station</th>
                                 <th>Ziel/Herkunft</th>
                                 <th>Verspätung</th>
                                 <th>Status</th>

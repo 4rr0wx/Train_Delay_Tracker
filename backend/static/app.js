@@ -4,6 +4,8 @@
 let currentDirection = "to_wien";
 let currentDays = 30;
 let currentTab = "overview";
+let currentProductFilter = null;
+let currentStatusFilter = null;
 
 // Chart instances
 const charts = {};
@@ -328,9 +330,37 @@ async function loadDaily(product, canvasId, color) {
     } catch (e) { console.error(`Daily (${product}):`, e); }
 }
 
+const STATION_NAMES = {
+    "1131839": "Ternitz",
+    "1191201": "Wien Meidling",
+    "915006": "Wien Westbahnhof",
+};
+
+function setProductFilter(product) {
+    currentProductFilter = product;
+    _updateFilterButtons(".table-filters .filter-group:first-child", product, [null, "regional", "subway"]);
+    loadDepartures();
+}
+
+function setStatusFilter(status) {
+    currentStatusFilter = status;
+    _updateFilterButtons(".table-filters .filter-group:last-child", status, [null, "on_time", "delayed", "cancelled"]);
+    loadDepartures();
+}
+
+function _updateFilterButtons(selector, activeValue, values) {
+    const btns = document.querySelectorAll(`${selector} .filter-btn`);
+    btns.forEach((btn, i) => {
+        btn.classList.toggle("active", values[i] === activeValue);
+    });
+}
+
 async function loadDepartures() {
+    let url = `/api/departures?direction=${currentDirection}&limit=50`;
+    if (currentProductFilter) url += `&product=${currentProductFilter}`;
+    if (currentStatusFilter) url += `&status=${currentStatusFilter}`;
     try {
-        const data = await fetchJSON(`/api/departures?direction=${currentDirection}&limit=30`);
+        const data = await fetchJSON(url);
         const tbody = document.getElementById("departures-body");
         tbody.innerHTML = "";
         if (data.length === 0) {
@@ -356,10 +386,11 @@ async function loadDepartures() {
             } else {
                 statusClass = "status-on-time"; statusText = "Pünktlich";
             }
+            const station = STATION_NAMES[d.station_id] || d.station_id || "–";
             tr.innerHTML = `
                 <td>${time}</td>
                 <td>${tag}</td>
-                <td>${isSubway ? "U-Bahn" : "Zug"}</td>
+                <td>${station}</td>
                 <td>${d.destination || "–"}</td>
                 <td>${d.cancelled ? "–" : (d.delay_minutes > 0 ? `${d.delay_minutes} Min` : "0 Min")}</td>
                 <td class="${statusClass}">${statusText}</td>
