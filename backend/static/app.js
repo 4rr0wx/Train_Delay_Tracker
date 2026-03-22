@@ -21,6 +21,11 @@ let journeyTotalCount = 0;
 let todayViewDate = null;       // null = heute; "YYYY-MM-DD" = historische Ansicht
 let todayEarliestDate = null;   // frühestes verfügbares Datum (Backend-Abfrage)
 
+// Flexible commute state (Gleitzeit)
+let todayTripsData = null;      // cached response from /api/commute/trips
+let morningSelectedIdx = 0;     // index into todayTripsData.morning
+let eveningSelectedIdx = 0;     // index into todayTripsData.evening
+
 const charts = {};
 
 // ÖBB-inspired color palette
@@ -299,13 +304,11 @@ function updateTodayNavButtons() {
 async function loadToday() {
   const isToday = _isViewingToday();
 
-  // Display date (with weekday via existing fmtDateLong)
   const displayDate = todayViewDate
     ? new Date(todayViewDate + "T00:00:00")
     : new Date();
   document.getElementById("today-date").textContent = fmtDateLong(displayDate.toISOString());
 
-  // Refresh label
   const refreshEl = document.getElementById("today-refresh");
   if (isToday) {
     const now = new Date();
@@ -316,27 +319,139 @@ async function loadToday() {
   }
 
   updateTodayNavButtons();
-
   setRefreshLoading(true);
   try {
     const url = todayViewDate
-      ? `/api/commute/overview?date=${todayViewDate}`
-      : "/api/commute/overview";
+      ? `/api/commute/trips?date=${todayViewDate}`
+      : "/api/commute/trips";
     const data = await fetchJSON(url);
-    renderMorning(data.morning);
-    renderEvening(data.evening);
+    todayTripsData = data;
 
-    // Show info banner when no data at all for selected day
-    const allUnseen =
-      data.morning.every(j => !j.cjx.today.seen_today && !j.u6.today.seen_today) &&
-      !data.evening.cjx.today.seen_today &&
-      !data.evening.u6.today.seen_today;
+    // When loading fresh data, pick smart defaults only for today's view
+    if (isToday) {
+      morningSelectedIdx = _smartMorningIndex(data.morning);
+      eveningSelectedIdx = _smartEveningIndex(data.evening);
+    } else {
+      // Historical: keep selection clamped to valid range
+      morningSelectedIdx = Math.min(morningSelectedIdx, Math.max(0, data.morning.length - 1));
+      eveningSelectedIdx = Math.min(eveningSelectedIdx, Math.max(0, data.evening.length - 1));
+    }
+
+    _buildTripDropdown("morning", data.morning, morningSelectedIdx);
+    _buildTripDropdown("evening", data.evening, eveningSelectedIdx);
+    renderMorningTrip();
+    renderEveningTrip();
+
+    const allUnseen = data.morning.length === 0 && data.evening.length === 0;
     const noDataBanner = document.getElementById("no-data-banner");
     if (noDataBanner) noDataBanner.style.display = allUnseen ? "flex" : "none";
   } catch (e) {
     console.error("Today load failed:", e);
   } finally {
     setRefreshLoading(false);
+  }
+}
+
+/** Return the index of the train closest to the current time (for morning). */
+function _smartMorningIndex(trips) {
+  if (!trips || trips.length === 0) return 0;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  // Prefer the next upcoming train, fallback to the latest past one
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  trips.forEach((t, i) => {
+    const [h, m] = t.cjx_dep.split(":").map(Number);
+    const diff = h * 60 + m - nowMin;
+    // Weight: upcoming trains slightly preferred; past trains OK too
+    const score = diff >= 0 ? diff : -diff + 1000;
+    if (score < bestDiff) { bestDiff = score; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+/** Return the index of the train closest to the current time (for evening). */
+function _smartEveningIndex(trips) {
+  if (!trips || trips.length === 0) return 0;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  trips.forEach((t, i) => {
+    const [h, m] = t.cjx_dep.split(":").map(Number);
+    const diff = h * 60 + m - nowMin;
+    const score = diff >= 0 ? diff : -diff + 1000;
+    if (score < bestDiff) { bestDiff = score; bestIdx = i; }
+  });
+  return bestIdx;
+}
+
+function _buildTripDropdown(direction, trips, selectedIdx) {
+  const rowEl = document.getElementById(`${direction}-selector-row`);
+  const selectEl = document.getElementById(`${direction}-trip-select`);
+  if (!rowEl || !selectEl) return;
+
+  if (trips.length <= 1) {
+    rowEl.style.display = "none";
+    return;
+  }
+  rowEl.style.display = "flex";
+  selectEl.innerHTML = trips.map((t, i) => {
+    const label = direction === "morning"
+      ? `CJX ${t.cjx_dep}${t.u6_dep ? " → U6 " + t.u6_dep : ""}`
+      : `CJX ${t.cjx_dep}${t.u6_dep ? " (U6 " + t.u6_dep + ")" : ""}`;
+    return `<option value="${i}"${i === selectedIdx ? " selected" : ""}>${label}</option>`;
+  }).join("");
+}
+
+function selectTrip(direction, idx) {
+  if (!todayTripsData) return;
+  if (direction === "morning") {
+    morningSelectedIdx = idx;
+    renderMorningTrip();
+  } else {
+    eveningSelectedIdx = idx;
+    renderEveningTrip();
+  }
+}
+
+function renderMorningTrip() {
+  if (!todayTripsData) return;
+  const trips = todayTripsData.morning;
+  if (trips.length === 0) {
+    document.getElementById("morning-cards").innerHTML =
+      `<div class="empty-state">Heute noch keine Morgenfahrten erfasst.</div>`;
+    document.getElementById("morning-connection").style.display = "none";
+    return;
+  }
+  const j = trips[morningSelectedIdx] || trips[0];
+  document.getElementById("morning-cards").innerHTML = journeyCommuteCard(j, false);
+
+  const hint = document.getElementById("morning-connection");
+  const warn = j.cjx.today.seen_today && !j.cjx.today.cancelled && (j.cjx.today.delay_minutes || 0) > 4;
+  hint.style.display = warn ? "flex" : "none";
+  if (warn && j.u6_dep) {
+    hint.innerHTML = `<span>&#9888;</span><span>CJX ${j.cjx_dep}: Verspätung – U6-Anschluss ${j.u6_dep} prüfen!</span>`;
+  }
+}
+
+function renderEveningTrip() {
+  if (!todayTripsData) return;
+  const trips = todayTripsData.evening;
+  if (trips.length === 0) {
+    document.getElementById("evening-cards").innerHTML =
+      `<div class="empty-state">Heute noch keine Abendfahrten erfasst.</div>`;
+    document.getElementById("evening-connection").style.display = "none";
+    return;
+  }
+  const j = trips[eveningSelectedIdx] || trips[0];
+  document.getElementById("evening-cards").innerHTML = journeyCommuteCard(j, true);
+
+  const hint = document.getElementById("evening-connection");
+  const warn = j.u6 && j.u6.today.seen_today && !j.u6.today.cancelled && (j.u6.today.delay_minutes || 0) > 10;
+  hint.style.display = warn ? "flex" : "none";
+  if (warn) {
+    hint.innerHTML = `<span>&#9888;</span><span>U6 stark verspätet – CJX-Anschluss ${j.cjx_dep} möglicherweise gefährdet!</span>`;
   }
 }
 
@@ -388,17 +503,15 @@ function legCard(train) {
     </div>`;
 }
 
-// Journey card groups two legs (CJX + U6) with a full station timeline across both
+// Journey card groups two legs (CJX + optional U6) with a full station timeline
 function journeyCommuteCard(journey, isEvening = false) {
-  const cjx = isEvening ? journey.cjx : journey.cjx;
-  const u6  = journey.u6;
+  const cjx = journey.cjx;
+  const u6  = journey.u6;  // may be null when no U6 connection was found
 
-  // Full timeline: for morning Ternitz→Baden→Meidling→Westbahnhof
-  //               for evening Westbahnhof→Meidling→Ternitz
   const cjxDs = cjx.today.delay_seconds;
-  const u6Ds  = u6.today.delay_seconds;
+  const u6Ds  = u6 ? u6.today.delay_seconds : null;
   const cjxCls = stationDelayClass(cjxDs);
-  const u6Cls  = stationDelayClass(u6Ds);
+  const u6Cls  = u6 ? stationDelayClass(u6Ds) : "unknown";
 
   function delayText(ds, seen) {
     if (!seen || ds === null || ds === undefined) return "—";
@@ -408,6 +521,13 @@ function journeyCommuteCard(journey, isEvening = false) {
   let timeline;
   if (!isEvening) {
     // Morning: Ternitz → Baden → Meidling ~~transfer~~ Meidling → Westbahnhof
+    const u6Part = u6 ? `
+        <div class="st-line st-line-transfer"></div>
+        <div class="st-stop">
+          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
+          <div class="st-label">Westbhf</div>
+          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
+        </div>` : "";
     timeline = `
       <div class="station-timeline">
         <div class="st-stop">
@@ -422,22 +542,16 @@ function journeyCommuteCard(journey, isEvening = false) {
           <div class="st-delay">—</div>
         </div>
         <div class="st-line"></div>
-        <div class="st-stop st-transfer">
+        <div class="st-stop ${u6 ? 'st-transfer' : ''}">
           <div class="st-dot unknown"></div>
           <div class="st-label">Meidling</div>
-          <div class="st-delay">Umstieg</div>
+          <div class="st-delay">${u6 ? "Umstieg" : "—"}</div>
         </div>
-        <div class="st-line st-line-transfer"></div>
-        <div class="st-stop">
-          <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
-          <div class="st-label">Westbhf</div>
-          <div class="st-delay ${u6.today.seen_today ? u6Cls : ''}">${delayText(u6Ds, u6.today.seen_today)}</div>
-        </div>
+        ${u6Part}
       </div>`;
   } else {
-    // Evening: Westbahnhof → Meidling ~~transfer~~ Meidling → Baden → Ternitz
-    timeline = `
-      <div class="station-timeline">
+    // Evening: (Westbahnhof →) Meidling → Baden → Ternitz
+    const u6Part = u6 ? `
         <div class="st-stop">
           <div class="st-dot ${u6.today.seen_today ? u6Cls : 'unknown'}"></div>
           <div class="st-label">Westbhf</div>
@@ -449,10 +563,13 @@ function journeyCommuteCard(journey, isEvening = false) {
           <div class="st-label">Meidling</div>
           <div class="st-delay">Umstieg</div>
         </div>
-        <div class="st-line st-line-transfer"></div>
+        <div class="st-line st-line-transfer"></div>` : "";
+    timeline = `
+      <div class="station-timeline">
+        ${u6Part}
         <div class="st-stop">
           <div class="st-dot ${cjx.today.seen_today ? cjxCls : 'unknown'}"></div>
-          <div class="st-label">Baden</div>
+          <div class="st-label">${u6 ? "Baden" : "Meidling"}</div>
           <div class="st-delay">—</div>
         </div>
         <div class="st-line"></div>
@@ -463,40 +580,18 @@ function journeyCommuteCard(journey, isEvening = false) {
         </div>
       </div>`;
   }
+
+  const legParts = isEvening
+    ? (u6 ? legCard(u6) + legCard(cjx) : legCard(cjx))
+    : (u6 ? legCard(cjx) + legCard(u6) : legCard(cjx));
 
   return `
     <div class="commute-journey-card">
       ${timeline}
       <div class="commute-legs">
-        ${isEvening ? legCard(u6) + legCard(cjx) : legCard(cjx) + legCard(u6)}
+        ${legParts}
       </div>
     </div>`;
-}
-
-function renderMorning(journeys) {
-  document.getElementById("morning-cards").innerHTML = journeys.map(j => journeyCommuteCard(j, false)).join("");
-  // Connection warning if CJX is heavily delayed
-  const warnings = journeys
-    .filter(j => j.cjx.today.seen_today && !j.cjx.today.cancelled && (j.cjx.today.delay_minutes || 0) > 4)
-    .map(j => `CJX ${j.cjx_dep}: ⚠ Verspätung – U6-Anschluss ${j.u6_dep} prüfen!`);
-  const hint = document.getElementById("morning-connection");
-  hint.style.display = warnings.length > 0 ? "flex" : "none";
-  if (warnings.length > 0) {
-    hint.innerHTML = `<span>&#9888;</span><span>${warnings.join(" | ")}</span>`;
-  }
-}
-
-function renderEvening(journey) {
-  // journey is now a single object with .u6 and .cjx legs
-  document.getElementById("evening-cards").innerHTML = journeyCommuteCard(journey, true);
-  // Show warning if U6 is so delayed that CJX connection at 16:35 is at risk
-  const u6delayed = journey.u6.today.seen_today && !journey.u6.today.cancelled
-    && (journey.u6.today.delay_minutes || 0) > 10;
-  const hint = document.getElementById("evening-connection");
-  hint.style.display = u6delayed ? "flex" : "none";
-  if (u6delayed) {
-    hint.innerHTML = `<span>&#9888;</span><span>U6 stark verspätet – CJX-Anschluss ${journey.cjx_dep} möglicherweise gefährdet!</span>`;
-  }
 }
 
 // ============================================================
