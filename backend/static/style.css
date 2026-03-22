@@ -1057,3 +1057,64 @@ body {
   .stat-card-value { font-size: 20px; }
   .filter-row { flex-direction: column; }
 }
+
+/* ===================== LARGE DESKTOP (≥1024px) ===================== */
+@media (min-width: 1024px) {
+  .app-main {
+    max-width: 1400px;
+    padding: 20px 24px;
+  }
+
+  /* 3-column chart grid with staggered layout:
+     Wide cards span 2 cols → gives a magazine-style dashboard feel
+     Layout: [wide(1-2)] [normal] / [normal] [wide(2-3)] / [n][n][_] / [wide(1-2)][_] */
+  .charts-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .chart-card-wide {
+    grid-column: span 2;
+  }
+
+  /* All 6 stat cards on one row */
+  .stat-cards {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+  }
+
+  /* Tighter stat cards */
+  .stat-card {
+    padding: 10px 12px;
+  }
+  .stat-card-value {
+    font-size: 20px;
+  }
+  .stat-card-label {
+    font-size: 10px;
+    margin-bottom: 4px;
+  }
+  .stat-card-sub {
+    font-size: 10px;
+    margin-top: 3px;
+  }
+
+  /* Tighter chart cards */
+  .chart-card {
+    padding: 12px;
+  }
+  .chart-card-header {
+    margin-bottom: 10px;
+  }
+  .chart-card h4 {
+    font-size: 12px;
+  }
+  .chart-desc {
+    font-size: 10px;
+  }
+
+  /* Compact period bar */
+  .stats-period-bar {
+    margin-bottom: 12px;
+    gap: 8px;
+  }
+}
