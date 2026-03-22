@@ -413,8 +413,8 @@ def get_journey_stats(
         anchor_product = "regional"
         anchor_dir = "to_wien"
     else:
-        anchor_station = WIEN_WESTBAHNHOF_STATION_ID
-        anchor_product = "subway"
+        anchor_station = WIEN_MEIDLING_STATION_ID
+        anchor_product = "regional"
         anchor_dir = "to_ternitz"
 
     query = text(f"""
