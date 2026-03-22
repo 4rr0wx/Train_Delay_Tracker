@@ -196,6 +196,24 @@ def collect_data():
             obs.append(o)
 
     # -----------------------------------------------------------------------
+    # CJX at Wien Meidling (track delay buildup during the journey)
+    # -----------------------------------------------------------------------
+
+    # to_wien: CJX arriving at Wien Meidling from Ternitz direction
+    for item in _get(WIEN_MEIDLING_STATION_ID, "arrivals"):
+        if _is_cjx(item):
+            o = _parse(item, WIEN_MEIDLING_STATION_ID, "to_wien")
+            if o:
+                obs.append(o)
+
+    # to_ternitz: CJX departing Wien Meidling towards Ternitz
+    for item in _get(WIEN_MEIDLING_STATION_ID, "departures"):
+        if _is_cjx(item) and not _cjx_is_wien_bound(item):
+            o = _parse(item, WIEN_MEIDLING_STATION_ID, "to_ternitz")
+            if o:
+                obs.append(o)
+
+    # -----------------------------------------------------------------------
     # LEG 2: U6 at Wien Westbahnhof
     # -----------------------------------------------------------------------
 
