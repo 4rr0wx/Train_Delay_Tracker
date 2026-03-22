@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from scheduler import scheduler
 from collector import collect_data
+from database import ensure_stations
 from routes import health, stats, departures, commute, journeys
 
 logging.basicConfig(
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure all known stations exist in DB (idempotent, safe on every restart)
+    ensure_stations()
     logger.info("Starting scheduler...")
     scheduler.start()
     # Run an initial collection on startup
