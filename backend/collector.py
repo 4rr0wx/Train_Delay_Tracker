@@ -19,6 +19,7 @@ from config import (
     TERNITZ_STATION_ID,
     WIEN_MEIDLING_STATION_ID,
     WIEN_WESTBAHNHOF_STATION_ID,
+    WIENER_NEUSTADT_STATION_ID,
     BADEN_STATION_ID,
     POLL_DURATION_MINUTES,
     RELEVANT_TRAIN_LINE,
@@ -178,7 +179,26 @@ def collect_data():
                 obs.append(o)
 
     # -----------------------------------------------------------------------
-    # LEG 1b: CJX at Baden bei Wien (intermediate stop, diversion detection)
+    # LEG 1b: CJX at Wiener Neustadt (intermediate stop, delay tracking)
+    # Route order: Ternitz → Wiener Neustadt → Baden → Wien Meidling
+    # -----------------------------------------------------------------------
+
+    # to_wien: CJX departures from Wiener Neustadt towards Wien
+    for item in _get(WIENER_NEUSTADT_STATION_ID, "departures"):
+        if _is_cjx(item) and _cjx_is_wien_bound(item):
+            o = _parse(item, WIENER_NEUSTADT_STATION_ID, "to_wien")
+            if o:
+                obs.append(o)
+
+    # to_ternitz: CJX arrivals at Wiener Neustadt (coming from Wien direction)
+    for item in _get(WIENER_NEUSTADT_STATION_ID, "arrivals"):
+        if _is_cjx(item):
+            o = _parse(item, WIENER_NEUSTADT_STATION_ID, "to_ternitz")
+            if o:
+                obs.append(o)
+
+    # -----------------------------------------------------------------------
+    # LEG 1c: CJX at Baden bei Wien (intermediate stop, diversion detection)
     # -----------------------------------------------------------------------
 
     # to_wien: CJX departures from Baden towards Wien

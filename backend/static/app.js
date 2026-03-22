@@ -524,7 +524,7 @@ async function loadJourneys() {
       return;
     }
 
-    list.innerHTML = data.journeys.map(renderJourneyCard).join("");
+    list.innerHTML = renderJourneyTable(data.journeys, filterState.direction || "to_wien");
   } catch (e) {
     list.innerHTML = `<div class="empty-state">Fehler beim Laden der Daten.</div>`;
     console.error("Journeys load failed:", e);
@@ -538,101 +538,65 @@ function nextPage() {
   if ((journeyPage + 1) * journeyPageSize < journeyTotalCount) { journeyPage++; loadJourneys(); }
 }
 
-function renderJourneyCard(j) {
-  const dir = j.direction;
-  const diverted = j.was_diverted;
+// Station columns per direction
+const JOURNEY_COLS = {
+  to_wien:    ["ternitz", "wiener_neustadt", "baden", "wien_meidling"],
+  to_ternitz: ["wien_meidling", "baden", "wiener_neustadt", "ternitz"],
+};
+const JOURNEY_COL_LABELS = {
+  ternitz: "Ternitz", wiener_neustadt: "Wr. Neustadt",
+  baden: "Baden", wien_meidling: "Meidling",
+};
 
-  // Build station stops
-  let stops = [];
-  if (dir === "to_wien") {
-    const t  = j.stations.ternitz;
-    const b  = j.stations.baden;
-    const m  = j.stations.wien_meidling;
-    stops = [
-      { name: "Ternitz",  data: t,  first: true },
-      { name: "Baden",    data: b,  skipped: diverted || (b && !b.observed) },
-      { name: "Meidling", data: m,  last: true },
-    ];
-  } else {
-    const w  = j.stations.wien_westbahnhof;
-    const m  = j.stations.wien_meidling;
-    stops = [
-      { name: "Westbhf",  data: w,  first: true },
-      { name: "Meidling", data: m,  last: true },
-    ];
-  }
-
-  // Overall status (based on arrival at last stop)
-  const lastStop = stops[stops.length - 1];
-  const lastDelay = lastStop?.data?.delay_seconds;
-  const anyCancelled = stops.some(s => s.data?.cancelled);
-  let statusClass = "ok";
-  let statusText = "Pünktlich";
-  if (anyCancelled) { statusClass = "cancel"; statusText = "AUSFALL"; }
-  else if (lastDelay === null || lastDelay === undefined) { statusClass = "ok"; statusText = "Pünktlich"; }
-  else if (lastDelay >= 300) { statusClass = "bad"; statusText = `+${Math.round(lastDelay/60)} Min`; }
-  else if (lastDelay >= 60)  { statusClass = "warn"; statusText = `+${Math.round(lastDelay/60)} Min`; }
-
-  // Departure time (from first anchor station)
-  const firstData = stops[0].data;
-  const depTime = firstData?.planned ? fmtTime(firstData.planned) : "—";
-  const depDate = firstData?.planned ? fmtDate(firstData.planned) : "—";
-
-  const timelineHtml = buildJourneyTimeline(stops, diverted);
-
-  return `
-    <div class="journey-card ${diverted ? 'diverted' : ''} ${anyCancelled ? 'cancelled' : ''}">
-      <div class="journey-card-top">
-        <div class="journey-meta">
-          <div class="journey-time">${depTime}</div>
-          <div class="journey-date">${depDate}</div>
-        </div>
-        <div class="journey-badges">
-          <span class="journey-line-badge">${j.line_name || (dir === 'to_wien' ? 'CJX' : 'U6')}</span>
-          ${diverted ? `<span class="diversion-badge">&#9888; Umleitung (kein Baden)</span>` : ""}
-          <span class="status-badge ${statusClass}">${statusText}</span>
-        </div>
-      </div>
-      ${timelineHtml}
-    </div>
-  `;
+function _journeyDelayCellHtml(s) {
+  if (!s || s.observed === false) return `<td class="delay-cell skipped">—</td>`;
+  if (s.cancelled) return `<td class="delay-cell cancel">Ausfall</td>`;
+  const ds = s.delay_seconds;
+  if (ds === null || ds === undefined) return `<td class="delay-cell ok">0 Min</td>`;
+  const min = Math.round(ds / 60);
+  const cls = ds < 0 ? "recover" : ds < 60 ? "ok" : ds < 300 ? "warn" : "bad";
+  return `<td class="delay-cell ${cls}">${ds > 0 ? "+" : ""}${min} Min</td>`;
 }
 
-function buildJourneyTimeline(stops, diverted) {
-  let html = `<div class="journey-timeline">`;
+function renderJourneyTable(journeys, direction) {
+  const cols = JOURNEY_COLS[direction] || JOURNEY_COLS.to_wien;
 
-  stops.forEach((stop, i) => {
-    const data = stop.data;
-    const isFirst = i === 0;
-    const isLast = i === stops.length - 1;
-    const isSkipped = stop.skipped || (data && !data.observed && !isFirst && !isLast);
+  const thead = `<thead><tr>
+    <th>Datum</th>
+    <th>Abfahrt</th>
+    <th>Linie</th>
+    ${cols.map(c => `<th>${JOURNEY_COL_LABELS[c]}</th>`).join("")}
+    <th>Status</th>
+  </tr></thead>`;
 
-    const ds = data?.delay_seconds;
-    const dc = isSkipped ? "skipped" : (data?.observed === false && !isFirst ? "unobserved" : delayClass(ds));
-    const delayStr = isSkipped ? "—" : (ds !== null && ds !== undefined ? fmtDelay(Math.round(ds/60)) : (data?.observed ? "0 Min" : "—"));
-    const plannedStr = data?.planned ? fmtTime(data.planned) : "";
-    const lineClass = (i > 0 && stops[i-1].skipped) ? "dashed" : "";
+  const rows = journeys.map(j => {
+    const firstData = j.stations[cols[0]];
+    const lastData  = j.stations[cols[cols.length - 1]];
+    const depTime = firstData?.planned ? fmtTime(firstData.planned) : "—";
+    const depDate = firstData?.planned ? fmtDate(firstData.planned) : "—";
 
-    html += `<div class="jt-stop">`;
-    html += `<div class="jt-dot-row">`;
-    if (!isFirst) html += `<div class="jt-line-before ${lineClass}"></div>`;
-    html += `<div class="jt-dot ${dc}"></div>`;
-    if (!isLast) html += `<div class="jt-line-after"></div>`;
-    html += `</div>`;
-    html += `<div class="jt-info">`;
-    html += `<div class="jt-name">${stop.name}</div>`;
-    if (isSkipped) {
-      html += `<div class="jt-skipped-label">kein Halt</div>`;
-    } else {
-      html += `<div class="jt-delay ${dc}">${delayStr}</div>`;
-    }
-    if (plannedStr) html += `<div class="jt-planned">${plannedStr}</div>`;
-    html += `</div>`;
-    html += `</div>`;
-  });
+    // Final status: based on last station's delay
+    const anyCancelled = Object.values(j.stations).some(s => s?.cancelled);
+    const lastDelay = lastData?.delay_seconds;
+    let sCls = "ok", sTxt = "Pünktlich";
+    if (anyCancelled)         { sCls = "cancel"; sTxt = "AUSFALL"; }
+    else if (lastDelay >= 300){ sCls = "bad";    sTxt = `+${Math.round(lastDelay / 60)} Min`; }
+    else if (lastDelay >= 60) { sCls = "warn";   sTxt = `+${Math.round(lastDelay / 60)} Min`; }
 
-  html += `</div>`;
-  return html;
+    const delayCells = cols.map(key => _journeyDelayCellHtml(j.stations[key])).join("");
+    const divBadge = j.was_diverted
+      ? `<span class="diversion-badge" title="Umleitung – kein Halt in Baden">&#9888;</span> ` : "";
+
+    return `<tr class="${anyCancelled ? "row-cancelled" : ""}">
+      <td class="col-date">${depDate}</td>
+      <td class="col-time">${depTime}</td>
+      <td>${divBadge}<span class="line-cjx">${j.line_name || "CJX"}</span></td>
+      ${delayCells}
+      <td><span class="status-badge ${sCls}">${sTxt}</span></td>
+    </tr>`;
+  }).join("");
+
+  return `<table class="journey-data-table"><${thead}<tbody>${rows}</tbody></table>`;
 }
 
 // ============================================================
