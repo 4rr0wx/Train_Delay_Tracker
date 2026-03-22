@@ -111,8 +111,12 @@
   <!-- ===== TAB: HEUTE ===== -->
   <div id="tab-heute" class="tab-content active">
     <div class="today-header">
-      <h2 id="today-date" class="today-date"></h2>
-      <span id="today-refresh" class="today-refresh-label"></span>
+      <button class="day-nav-btn" id="btn-day-prev" onclick="prevDay()" title="Vorheriger Tag">&#8592;</button>
+      <div class="today-date-block">
+        <h2 id="today-date" class="today-date"></h2>
+        <span id="today-refresh" class="today-refresh-label"></span>
+      </div>
+      <button class="day-nav-btn" id="btn-day-next" onclick="nextDay()" title="Nächster Tag" disabled>&#8594;</button>
     </div>
 
     <div id="diversion-alert" class="alert-banner" style="display:none">

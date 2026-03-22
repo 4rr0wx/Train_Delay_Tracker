@@ -18,6 +18,33 @@ let journeyPage = 0;
 let journeyPageSize = 50;
 let journeyTotalCount = 0;
 
+// Day navigation for the Heute tab
+let viewDate = new Date();   // date currently shown (local midnight)
+let earliestDate = null;     // "YYYY-MM-DD", set from first API response
+
+function _isoToLocalDate(s) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function _localDateToISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function prevDay() {
+  if (earliestDate && _localDateToISO(viewDate) <= earliestDate) return;
+  const d = new Date(viewDate);
+  d.setDate(d.getDate() - 1);
+  viewDate = d;
+  loadToday();
+}
+function nextDay() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  if (viewDate >= today) return;
+  const d = new Date(viewDate);
+  d.setDate(d.getDate() + 1);
+  viewDate = d;
+  loadToday();
+}
+
 const charts = {};
 
 // ÖBB-inspired color palette
@@ -129,7 +156,7 @@ function switchTab(tab) {
   const bnavBtn = document.getElementById(`bnav-${tab}`);
   if (bnavBtn) bnavBtn.classList.add("active");
 
-  if (tab === "heute")       loadToday();
+  if (tab === "heute")       { viewDate = new Date(); viewDate.setHours(0,0,0,0); loadToday(); }
   else if (tab === "reisen") { journeyPage = 0; loadJourneys(); }
   else if (tab === "statistiken") loadStatistics();
   else if (tab === "umleitungen") loadDiversions();
@@ -253,15 +280,30 @@ function refreshCurrentTab() {
 // ============================================================
 
 async function loadToday() {
-  const dateEl = document.getElementById("today-date");
-  const now = new Date();
-  dateEl.textContent = fmtDateLong(now.toISOString());
-  document.getElementById("today-refresh").textContent =
-    "Automatisch aktualisiert um " + now.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" });
-
   setRefreshLoading(true);
+  const dateParam = _localDateToISO(viewDate);
   try {
-    const data = await fetchJSON("/api/commute/overview");
+    const data = await fetchJSON(`/api/commute/overview?date=${dateParam}`);
+
+    // Store earliest date for prev-day boundary
+    if (data.earliest_date) earliestDate = data.earliest_date;
+
+    // Update date display
+    const displayDate = _isoToLocalDate(data.date);
+    document.getElementById("today-date").textContent =
+      displayDate.toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+    const subLabel = data.is_today
+      ? "Heute – automatisch aktualisiert um " + new Date().toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })
+      : "Archivdaten – historischer Tag";
+    document.getElementById("today-refresh").textContent = subLabel;
+
+    // Update nav button states
+    const today = new Date(); today.setHours(0,0,0,0);
+    document.getElementById("btn-day-next").disabled = viewDate >= today;
+    document.getElementById("btn-day-prev").disabled =
+      earliestDate ? dateParam <= earliestDate : false;
+
     renderMorning(data.morning);
     renderEvening(data.evening);
   } catch (e) {
@@ -938,7 +980,11 @@ function deepMerge(target, source) {
 
 function startAutoRefresh() {
   setInterval(() => {
-    if (currentTab === "heute") loadToday();
+    // Only auto-refresh when viewing today (don't re-fetch archived days)
+    if (currentTab === "heute") {
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (_localDateToISO(viewDate) === _localDateToISO(today)) loadToday();
+    }
   }, 60_000);
 }
 

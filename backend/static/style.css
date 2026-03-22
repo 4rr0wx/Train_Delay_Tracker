@@ -264,18 +264,49 @@ body {
 /* ===================== TODAY TAB ===================== */
 .today-header {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 16px;
 }
+.today-date-block {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
 .today-date {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--dark);
+  line-height: 1.2;
 }
 .today-refresh-label {
   font-size: 11px;
   color: var(--grey-500);
+}
+.day-nav-btn {
+  background: var(--white);
+  border: 1px solid var(--grey-300);
+  border-radius: var(--radius);
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--dark);
+  flex-shrink: 0;
+  transition: background 0.12s, border-color 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.day-nav-btn:hover:not(:disabled) {
+  background: var(--grey-100);
+  border-color: var(--grey-500);
+}
+.day-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .alert-banner {
