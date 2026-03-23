@@ -267,7 +267,7 @@ def seed_reference_data(db: Session) -> None:
                     name, route_id, direction, anchor_time_local,
                     anchor_station_id, time_tolerance_minutes
                 )
-                SELECT :name, r.id, :direction::trip_direction, :anchor_time_local,
+                SELECT :name, r.id, CAST(:direction AS trip_direction), :anchor_time_local,
                        :anchor_station_id, :time_tolerance_minutes
                 FROM routes r WHERE r.name = :route_name
                 ON CONFLICT (name) DO NOTHING
