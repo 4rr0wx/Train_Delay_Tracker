@@ -159,7 +159,7 @@ def _upsert(observations: list[dict]):
         for obs in observations:
             stmt = insert(TrainObservation).values(**obs)
             stmt = stmt.on_conflict_do_update(
-                index_elements=["trip_id", "planned_time"],
+                index_elements=["trip_id", "station_id"],
                 set_={
                     "actual_time": stmt.excluded.actual_time,
                     "delay_seconds": stmt.excluded.delay_seconds,

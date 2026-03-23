@@ -13,7 +13,7 @@ INSERT INTO stations (id, name) VALUES
 CREATE TABLE train_observations (
     id SERIAL PRIMARY KEY,
     trip_id VARCHAR(255) NOT NULL,
-    station_id VARCHAR(20) REFERENCES stations(id),
+    station_id VARCHAR(20) NOT NULL REFERENCES stations(id),
     direction VARCHAR(10) NOT NULL CHECK (direction IN ('to_wien', 'to_ternitz')),
     train_number VARCHAR(50),
     line_name VARCHAR(100),
@@ -27,7 +27,7 @@ CREATE TABLE train_observations (
     remarks JSONB,
     first_seen_at TIMESTAMPTZ DEFAULT NOW(),
     last_updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (trip_id, planned_time)
+    UNIQUE (trip_id, station_id)
 );
 
 CREATE INDEX idx_obs_direction ON train_observations(direction);
@@ -40,3 +40,10 @@ CREATE INDEX idx_obs_train_number ON train_observations(train_number);
 -- Migration for existing databases:
 -- ALTER TABLE train_observations ADD COLUMN IF NOT EXISTS train_number VARCHAR(50);
 -- CREATE INDEX IF NOT EXISTS idx_obs_train_number ON train_observations(train_number);
+--
+-- Migration for data-model fix (UNIQUE constraint change):
+-- Step 1: make station_id NOT NULL (skip if rows with NULL exist – clean them first)
+-- ALTER TABLE train_observations ALTER COLUMN station_id SET NOT NULL;
+-- Step 2: drop old unique constraint and create the correct one
+-- ALTER TABLE train_observations DROP CONSTRAINT IF EXISTS train_observations_trip_id_planned_time_key;
+-- ALTER TABLE train_observations ADD CONSTRAINT train_observations_trip_id_station_id_key UNIQUE (trip_id, station_id);
