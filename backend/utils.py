@@ -31,7 +31,7 @@ _SERVICE_DAY_CUTOFF_HOUR = 4
 # Module-level line cache (avoids repeated DB round-trips in the collector)
 # ---------------------------------------------------------------------------
 
-_line_cache: dict[str, Line] = {}
+_line_id_cache: dict[str, int] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -118,10 +118,10 @@ def get_line_by_code(db: Session, code: str) -> Line:
     Raises:
         ValueError: If no line with that code exists in the database.
     """
-    if code not in _line_cache:
+    if code not in _line_id_cache:
         line = db.query(Line).filter_by(code=code).one_or_none()
         if line is None:
             raise ValueError(f"Line with code {code!r} not found in database")
-        _line_cache[code] = line
+        _line_id_cache[code] = line.id
 
-    return _line_cache[code]
+    return db.get(Line, _line_id_cache[code])
