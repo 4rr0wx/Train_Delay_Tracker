@@ -251,13 +251,13 @@ def get_delay_distribution(
               {pc}
               AND tr.status::text != 'cancelled'
               AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
-            GROUP BY bucket
+            GROUP BY 1
             ORDER BY
-                CASE bucket
-                    WHEN 'Pünktlich' THEN 1
-                    WHEN '1-2 Min'   THEN 2
-                    WHEN '2-5 Min'   THEN 3
-                    WHEN '5-10 Min'  THEN 4
+                CASE
+                    WHEN ts.departure_delay_seconds IS NULL OR ts.departure_delay_seconds < 60  THEN 1
+                    WHEN ts.departure_delay_seconds < 120                                       THEN 2
+                    WHEN ts.departure_delay_seconds < 300                                       THEN 3
+                    WHEN ts.departure_delay_seconds < 600                                       THEN 4
                     ELSE 5
                 END
         """),
