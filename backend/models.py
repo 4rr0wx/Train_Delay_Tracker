@@ -33,11 +33,13 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
+    TIMESTAMP,
     Text,
     Time,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ
+
+TIMESTAMPTZ = TIMESTAMP(timezone=True)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
