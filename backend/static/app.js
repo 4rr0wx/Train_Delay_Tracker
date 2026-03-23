@@ -504,86 +504,148 @@ function legCard(train) {
 }
 
 // Journey card groups two legs (CJX + optional U6) with a full station timeline
-// Render a single station stop in the timeline using intermediate station data from API.
-function _stStop(label, data, forceDelay = null, extraCls = "") {
+// Render a single station stop in the timeline.
+// fallbackDs: anchor delay_seconds to show as estimate when station not yet observed.
+function _stStop(label, data, forceDelay = null, extraCls = "", fallbackDs = null) {
   const seen = data?.seen;
   const ds = data?.delay_seconds;
-  let cls;
-  if (!seen) {
+  let cls, delayTxt;
+
+  if (!seen && fallbackDs !== null && fallbackDs !== undefined) {
+    cls = fallbackDs < 60 ? "ok" : fallbackDs < 300 ? "warn" : "bad";
+    const min = Math.round(fallbackDs / 60);
+    delayTxt = `~${fallbackDs > 0 ? "+" : ""}${min} Min`;
+    extraCls = (extraCls + " st-estimated").trim();
+  } else if (!seen) {
     cls = "unknown";
+    delayTxt = "—";
   } else if (data.cancelled) {
     cls = "cancel";
+    delayTxt = "AUSFALL";
   } else if (ds === null || ds === undefined) {
     cls = "ok";
-  } else if (ds < 60)  { cls = "ok"; }
-  else if (ds < 300)   { cls = "warn"; }
-  else                 { cls = "bad"; }
-  const delayTxt = forceDelay ?? (
-    !seen ? "—"
-    : data.cancelled ? "AUSFALL"
-    : ds === null || ds === undefined ? "0 Min"
-    : `${ds > 0 ? "+" : ""}${Math.round(ds / 60)} Min`
-  );
+    delayTxt = "0 Min";
+  } else {
+    cls = ds < 60 ? "ok" : ds < 300 ? "warn" : "bad";
+    delayTxt = `${ds > 0 ? "+" : ""}${Math.round(ds / 60)} Min`;
+  }
+  if (forceDelay !== null) delayTxt = forceDelay;
   return `<div class="st-stop${extraCls ? " " + extraCls : ""}">
     <div class="st-dot ${cls}"></div>
     <div class="st-label">${label}</div>
-    <div class="st-delay ${seen ? cls : ''}">${delayTxt}</div>
+    <div class="st-delay ${seen || (fallbackDs !== null && fallbackDs !== undefined) ? cls : ''}">${delayTxt}</div>
   </div>`;
+}
+
+/**
+ * Determine the current CJX segment index (0-based) for the active train.
+ * Returns { segmentIdx } where segmentIdx is the index of the st-line element
+ * that is currently active (train is between station[i] and station[i+1]).
+ * Returns null if the train is not currently en route.
+ */
+function _getCurrentCJXSegment(journey, isEvening) {
+  if (!_isViewingToday()) return null;
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  const rawStations = !isEvening ? [
+    { t: journey.cjx_dep },
+    { t: journey.wiener_neustadt?.planned_time_local },
+    { t: journey.baden?.planned_time_local },
+    { t: journey.meidling_cjx?.planned_time_local },
+  ] : [
+    { t: journey.cjx_dep },
+    { t: journey.baden?.planned_time_local },
+    { t: journey.wiener_neustadt?.planned_time_local },
+    { t: journey.ternitz?.planned_time_local },
+  ];
+
+  const pts = rawStations.map((s, i) => {
+    if (!s.t) return null;
+    const [h, m] = s.t.split(":").map(Number);
+    return { idx: i, min: h * 60 + m };
+  }).filter(Boolean);
+
+  if (pts.length < 2) return null;
+  const first = pts[0], last = pts[pts.length - 1];
+  if (nowMin < first.min - 2 || nowMin > last.min + 30) return null;
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (nowMin >= pts[i].min && nowMin < pts[i + 1].min) {
+      // segmentIdx counts st-line elements in the CJX part of the timeline
+      return { segmentIdx: pts[i].idx };
+    }
+  }
+  return null;
+}
+
+function _stLine(segmentIdx, lineIdx, extraCls = "") {
+  const isActive = segmentIdx !== null && lineIdx === segmentIdx;
+  const cls = ["st-line", isActive ? "st-line-active" : "", extraCls].filter(Boolean).join(" ");
+  return `<div class="${cls}"></div>`;
 }
 
 function journeyCommuteCard(journey, isEvening = false) {
   const cjx = journey.cjx;
   const u6  = journey.u6;  // may be null when no U6 connection was found
 
-  const cjxDs  = cjx.today.delay_seconds;
-  const u6Ds   = u6 ? u6.today.delay_seconds : null;
-  const u6Cls  = u6 ? stationDelayClass(u6Ds) : "unknown";
+  const cjxDs = cjx.today.delay_seconds;
+  const u6Ds  = u6 ? u6.today.delay_seconds : null;
 
-  // Anchor station data objects (adapt _stStop format)
-  const ternitzData    = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
-  const westbhfData    = u6 ? { seen: u6.today.seen_today, delay_seconds: u6Ds, cancelled: u6.today.cancelled } : { seen: false };
-  const meidlingData   = journey.meidling_cjx || { seen: false };
+  // Station data objects
+  const ternitzData        = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
+  const westbhfData        = u6 ? { seen: u6.today.seen_today, delay_seconds: u6Ds, cancelled: u6.today.cancelled } : { seen: false };
+  const meidlingData       = journey.meidling_cjx || { seen: false };
+  const wnData             = journey.wiener_neustadt || { seen: false };
+  const badenData          = journey.baden || { seen: false };
+  const ternitzArrData     = journey.ternitz || ternitzData;
 
-  // Intermediate station data from API
-  const wnData     = journey.wiener_neustadt || { seen: false };
-  const badenData  = journey.baden           || { seen: false };
-  const ternitzArrData = journey.ternitz     || ternitzData;
+  // Fallback: show anchor delay as estimate at unobserved intermediate stations
+  const anchorDs = cjx.today.seen_today ? cjxDs : null;
+
+  // Detect current train position (returns null or {segmentIdx})
+  const pos = _getCurrentCJXSegment(journey, isEvening);
+  const seg = pos ? pos.segmentIdx : null;
 
   let timeline;
   if (!isEvening) {
-    // Morning: Ternitz → Wr.Neustadt → Baden → Meidling ~~transfer~~ Westbahnhof
-    const meidlingStop = _stStop("Meidling", meidlingData, u6 ? "Umstieg" : null, u6 ? "st-transfer" : "");
+    // Morning: Ternitz(0) → Wr.Neustadt(1) → Baden(2) → Meidling(3) → Westbhf(U6)
+    // CJX segment lines: 0=Ternitz→WN, 1=WN→Baden, 2=Baden→Meidling
+    const meidlingStop = _stStop("Meidling", meidlingData, u6 ? "Umstieg" : null,
+      u6 ? "st-transfer" : "", meidlingData.seen ? null : anchorDs);
     const u6Part = u6 ? `
-        <div class="st-line st-line-transfer"></div>
+        ${_stLine(null, -1, "st-line-transfer")}
         ${_stStop("Westbhf", westbhfData)}` : "";
     timeline = `
       <div class="station-timeline">
         ${_stStop("Ternitz", ternitzData)}
-        <div class="st-line"></div>
-        ${_stStop("Wr. Neustadt", wnData)}
-        <div class="st-line"></div>
-        ${_stStop("Baden", badenData)}
-        <div class="st-line"></div>
+        ${_stLine(seg, 0)}
+        ${_stStop("Wr. Neustadt", wnData, null, "", wnData.seen ? null : anchorDs)}
+        ${_stLine(seg, 1)}
+        ${_stStop("Baden", badenData, null, "", badenData.seen ? null : anchorDs)}
+        ${_stLine(seg, 2)}
         ${meidlingStop}
         ${u6Part}
       </div>`;
   } else {
-    // Evening: Westbahnhof ~~transfer~~ Meidling → Baden → Wr.Neustadt → Ternitz
+    // Evening: (Westbhf U6) → Meidling(0) → Baden(1) → Wr.Neustadt(2) → Ternitz(3)
+    // CJX segment lines: 0=Meidling→Baden, 1=Baden→WN, 2=WN→Ternitz
+    const cjxAnchorAtMeidling = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
     const u6Part = u6 ? `
         ${_stStop("Westbhf", westbhfData)}
-        <div class="st-line"></div>
-        ${_stStop("Meidling", { seen: false }, "Umstieg", "st-transfer")}
-        <div class="st-line st-line-transfer"></div>` : "";
-    // Anchor CJX data is for Meidling departure; use as fallback only
-    const cjxAnchorData = { seen: cjx.today.seen_today, delay_seconds: cjxDs, cancelled: cjx.today.cancelled };
+        <div class="st-line"></div>` : "";
+    const meidlingEvening = _stStop("Meidling", cjxAnchorAtMeidling, u6 ? "Umstieg" : null,
+      u6 ? "st-transfer" : "");
     timeline = `
       <div class="station-timeline">
         ${u6Part}
-        ${_stStop("Baden", badenData)}
-        <div class="st-line"></div>
-        ${_stStop("Wr. Neustadt", wnData)}
-        <div class="st-line"></div>
-        ${_stStop("Ternitz", ternitzArrData)}
+        ${meidlingEvening}
+        ${_stLine(seg, 0, u6 ? "st-line-transfer" : "")}
+        ${_stStop("Baden", badenData, null, "", badenData.seen ? null : anchorDs)}
+        ${_stLine(seg, 1)}
+        ${_stStop("Wr. Neustadt", wnData, null, "", wnData.seen ? null : anchorDs)}
+        ${_stLine(seg, 2)}
+        ${_stStop("Ternitz", ternitzArrData, null, "", ternitzArrData.seen ? null : anchorDs)}
       </div>`;
   }
 

@@ -547,6 +547,33 @@ body {
   border-top: 2px dashed var(--grey-300) !important;
 }
 
+/* Active train segment – green animated shimmer */
+.st-line-active {
+  background: var(--green) !important;
+  position: relative;
+  overflow: hidden;
+}
+.st-line-active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.7) 50%, transparent 100%);
+  animation: trainMove 1.5s linear infinite;
+}
+@keyframes trainMove {
+  0%   { left: -60%; }
+  100% { left: 110%; }
+}
+
+/* Dashed dot for estimated (not yet directly observed) stations */
+.st-estimated .st-dot {
+  background: transparent !important;
+  border: 2px dashed currentColor;
+}
+
 .commute-journey-card .station-timeline {
   padding: 14px 16px 10px;
   border-bottom: 1px solid var(--grey-100);

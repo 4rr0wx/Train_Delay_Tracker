@@ -509,12 +509,13 @@ def get_diversions(
     result = db.execute(
         text("""
             WITH ternitz_trips AS (
-                SELECT trip_id, line_name, planned_time, delay_seconds, cancelled
+                SELECT DISTINCT ON (trip_id) trip_id, line_name, planned_time, delay_seconds, cancelled
                 FROM train_observations
                 WHERE station_id = :ternitz_station
                   AND direction = 'to_wien'
                   AND line_product = 'regional'
                   AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
+                ORDER BY trip_id, last_updated_at DESC
             ),
             meidling_trips AS (
                 SELECT DISTINCT trip_id FROM train_observations
@@ -528,11 +529,12 @@ def get_diversions(
                   AND direction = 'to_wien'
             ),
             meidling_delay AS (
-                SELECT trip_id, delay_seconds AS meidling_delay
+                SELECT DISTINCT ON (trip_id) trip_id, delay_seconds AS meidling_delay
                 FROM train_observations
                 WHERE station_id = :meidling_station
                   AND direction = 'to_wien'
                   AND line_product = 'regional'
+                ORDER BY trip_id, last_updated_at DESC
             )
             SELECT
                 t.trip_id,
