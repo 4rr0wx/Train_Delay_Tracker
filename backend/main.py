@@ -6,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from scheduler import scheduler
 from collector import collect_data
-from database import ensure_stations
+from database import SessionLocal
+from seed import seed_reference_data
 from routes import health, stats, departures, commute, journeys
 
 logging.basicConfig(
@@ -18,16 +19,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure all known stations exist in DB (idempotent, safe on every restart)
-    ensure_stations()
+    # 1. Seed reference data (idempotent; alembic migrations run via Dockerfile CMD)
+    with SessionLocal() as db:
+        seed_reference_data(db)
+
+    # 2. Start the background scheduler
     logger.info("Starting scheduler...")
     scheduler.start()
-    # Run an initial collection on startup
+
+    # 3. Run an initial data collection on startup
     try:
         collect_data()
     except Exception as e:
         logger.error("Initial collection failed: %s", e)
+
     yield
+
     logger.info("Shutting down scheduler...")
     scheduler.shutdown()
 

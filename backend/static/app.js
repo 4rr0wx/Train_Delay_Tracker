@@ -476,11 +476,13 @@ function legCard(train) {
   const isSubway = train.product === "subway";
   const lineClass = isSubway ? "commute-card-line subway" : "commute-card-line";
   const ds = train.today.delay_seconds;
-  const cls = stationDelayClass(ds);
-  const delayMin = ds !== null && ds !== undefined
-    ? (ds >= 0 ? `+${Math.round(ds / 60)}` : `${Math.round(ds / 60)}`)
-    : "?";
-  const h = train.history_30d;
+  const h = train.history_30d || {};
+
+  const remarksHtml = (train.remarks && train.remarks.length > 0)
+    ? `<div class="trip-remarks">${train.remarks.map(r =>
+        `<span class="remark-item">\u26A0\uFE0F ${r.text}</span>`
+      ).join("")}</div>`
+    : "";
 
   return `
     <div class="leg-card ${train.today.cancelled ? 'cancelled-leg' : ''}">
@@ -490,15 +492,16 @@ function legCard(train) {
         <div class="leg-route">${train.from_station} &rarr; ${train.to_station}</div>
         <div class="leg-today">${delayBadge(train.today)}</div>
       </div>
+      ${remarksHtml}
       <div class="commute-history">
         <span class="hist-item">Ø Verspätung (30T)</span>
-        <span class="hist-value">${h.avg_delay_minutes} Min</span>
+        <span class="hist-value">${h.avg_delay_minutes ?? "—"} Min</span>
         <span class="hist-item">Pünktlichkeit</span>
-        <span class="hist-value">${h.on_time_pct}%</span>
+        <span class="hist-value">${h.on_time_pct ?? "—"}%</span>
         <span class="hist-item">Ausfälle</span>
-        <span class="hist-value">${h.cancelled_count} (${h.cancellation_rate_pct}%)</span>
+        <span class="hist-value">${h.cancelled_count ?? "—"} (${h.cancellation_rate_pct ?? "—"}%)</span>
         <span class="hist-item">Beobachtungen</span>
-        <span class="hist-value">${h.total_observed}</span>
+        <span class="hist-value">${h.total_observed ?? "—"}</span>
       </div>
     </div>`;
 }
@@ -1130,12 +1133,77 @@ function deepMerge(target, source) {
 }
 
 // ============================================================
+//  Connection Stats
+// ============================================================
+
+async function loadConnectionStats() {
+  try {
+    const data = await fetchJSON("/api/commute/connection-stats?days=30");
+    const bar = document.getElementById("connection-stats-bar");
+    if (!bar) return;
+
+    function _render(pct, elId) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      if (pct === null || pct === undefined) {
+        el.textContent = "—";
+        el.className = "conn-stat-value";
+        return;
+      }
+      el.textContent = `${pct}%`;
+      el.className = `conn-stat-value ${pct >= 85 ? "good" : pct >= 65 ? "warn" : "bad"}`;
+    }
+
+    _render(data.morning?.connection_made_pct, "conn-morning-pct");
+    _render(data.evening?.connection_made_pct, "conn-evening-pct");
+    bar.style.display = "flex";
+  } catch (_) {}
+}
+
+// ============================================================
+//  Collection Health
+// ============================================================
+
+async function loadCollectionHealth() {
+  try {
+    const data = await fetchJSON("/api/health");
+    const el = document.getElementById("collection-status");
+    if (!el) return;
+    const col = data.last_collection;
+    if (!col || !col.last_collection_at) {
+      el.className = "collection-status warn";
+      el.textContent = "Keine Daten";
+      el.title = "Noch keine Erfassung abgeschlossen";
+      return;
+    }
+    const ageMs = Date.now() - new Date(col.last_collection_at).getTime();
+    const ageMins = Math.round(ageMs / 60000);
+    const statusFailed = col.last_collection_status === "failed";
+    let cls, label;
+    if (statusFailed || ageMins > 60) {
+      cls = "old";
+      label = statusFailed ? "Erfassung fehlgeschlagen" : `Vor ${ageMins} Min`;
+    } else if (ageMins > 15) {
+      cls = "warn";
+      label = `Vor ${ageMins} Min`;
+    } else {
+      cls = "ok";
+      label = ageMins < 2 ? "Gerade erfasst" : `Vor ${ageMins} Min`;
+    }
+    el.className = `collection-status ${cls}`;
+    el.textContent = label;
+    el.title = `Letzte Erfassung: ${new Date(col.last_collection_at).toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" })} — Status: ${col.last_collection_status}`;
+  } catch (_) {}
+}
+
+// ============================================================
 //  Auto-refresh
 // ============================================================
 
 function startAutoRefresh() {
   setInterval(() => {
     if (currentTab === "heute" && _isViewingToday()) loadToday();
+    loadCollectionHealth();
   }, 60_000);
 }
 
@@ -1158,6 +1226,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("filter-date-from").value = sevenDaysAgo.toISOString().slice(0, 10);
 
   loadToday();
+  loadCollectionHealth();
+  loadConnectionStats();
   startAutoRefresh();
 
   // Fetch earliest date once to set back-navigation boundary

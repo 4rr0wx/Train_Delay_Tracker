@@ -25,6 +25,7 @@
     <div class="header-refresh">
       <span id="refresh-indicator" class="refresh-dot"></span>
       <span id="refresh-label" class="refresh-label">Live</span>
+      <span id="collection-status" class="collection-status" title="Letzte Datenerfassung"></span>
     </div>
   </div>
 </header>
@@ -130,6 +131,18 @@
     <div id="diversion-alert" class="alert-banner" style="display:none">
       <span class="alert-icon">&#9888;</span>
       <span id="diversion-alert-text">Heute Umleitung erkannt – kein Halt in Baden!</span>
+    </div>
+
+    <div id="connection-stats-bar" class="connection-stats-bar" style="display:none">
+      <span class="conn-stat-item">
+        <span class="conn-stat-label">Anschluss Morgen (30T)</span>
+        <span class="conn-stat-value" id="conn-morning-pct">—</span>
+      </span>
+      <span class="conn-stat-sep">·</span>
+      <span class="conn-stat-item">
+        <span class="conn-stat-label">Anschluss Abend (30T)</span>
+        <span class="conn-stat-value" id="conn-evening-pct">—</span>
+      </span>
     </div>
 
     <section class="commute-section">

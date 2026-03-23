@@ -109,6 +109,17 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.collection-status {
+  font-size: 11px;
+  color: var(--grey-500);
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: none;
+}
+.collection-status.ok   { color: #00A550; background: rgba(0,165,80,0.1); display: inline; }
+.collection-status.warn { color: #F5A623; background: rgba(245,166,35,0.1); display: inline; }
+.collection-status.old  { color: #E2001A; background: rgba(226,0,26,0.1); display: inline; }
 
 /* ===================== TAB NAV (desktop) ===================== */
 .tab-nav {
@@ -519,6 +530,20 @@ body {
 }
 .hist-item { font-size: 11px; color: var(--grey-500); }
 .hist-value { font-size: 12px; font-weight: 600; color: var(--dark); text-align: right; }
+.trip-remarks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 0 4px;
+  border-top: 1px solid var(--grey-200);
+}
+.remark-item {
+  font-size: 11px;
+  color: #8a6000;
+  background: rgba(245,166,35,0.15);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
 
 /* ===== Journey commute card (groups two legs) ===== */
 .commute-journey-card {
@@ -611,6 +636,23 @@ body {
   flex: 1;
 }
 .leg-today { margin-left: auto; }
+
+.connection-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--grey-100);
+  border-bottom: 1px solid var(--grey-200);
+  font-size: 12px;
+}
+.conn-stat-item { display: flex; align-items: center; gap: 6px; }
+.conn-stat-label { color: var(--grey-500); }
+.conn-stat-value { font-weight: 600; color: var(--dark); }
+.conn-stat-value.good { color: #00A550; }
+.conn-stat-value.warn { color: #F5A623; }
+.conn-stat-value.bad  { color: #E2001A; }
+.conn-stat-sep { color: var(--grey-400); }
 
 .connection-hint {
   padding: 10px 16px 14px;
