@@ -218,6 +218,34 @@ def get_journeys(
             LIMIT :lim OFFSET :off
         """)
 
+    anchor_station_col = ":ternitz_station" if direction == "to_wien" else ":meidling_station"
+    anchor_dir = "to_wien" if direction == "to_wien" else "to_ternitz"
+    count_query = text(f"""
+        SELECT COUNT(*)
+        FROM trips tr
+        JOIN lines l ON l.id = tr.line_id
+        JOIN trip_stops anchor_ts ON anchor_ts.trip_id = tr.id
+                                 AND anchor_ts.station_id = {anchor_station_col}
+        WHERE tr.direction::text = '{anchor_dir}'
+          AND l.product_type = 'regional'
+          AND anchor_ts.planned_departure BETWEEN :date_from AND :date_to
+          {dow_clause}
+          {time_clause}
+    """)
+
+    count_params: dict = {
+        "ternitz_station": TERNITZ_STATION_ID,
+        "meidling_station": WIEN_MEIDLING_STATION_ID,
+        "date_from": df,
+        "date_to": dt,
+    }
+    if dow_list:
+        count_params["dow_list"] = dow_list
+    if time_list_expanded:
+        count_params["time_list_expanded"] = time_list_expanded
+
+    total_count = db.execute(count_query, count_params).scalar() or 0
+
     params: dict = {
         "ternitz_station": TERNITZ_STATION_ID,
         "wn_station": WIENER_NEUSTADT_STATION_ID,
@@ -320,7 +348,7 @@ def get_journeys(
                 },
             })
 
-    return {"total": len(result), "offset": offset, "limit": limit, "journeys": result}
+    return {"total": total_count, "offset": offset, "limit": limit, "journeys": result}
 
 
 # ---------------------------------------------------------------------------

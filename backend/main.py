@@ -1,6 +1,4 @@
 import logging
-import subprocess
-import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,36 +17,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_alembic_upgrade() -> None:
-    """Run `alembic upgrade head` as a subprocess from the backend directory."""
-    logger.info("Running Alembic migrations...")
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-    )
-    if result.stdout:
-        logger.info("Alembic: %s", result.stdout.strip())
-    if result.returncode != 0:
-        logger.error("Alembic migration failed: %s", result.stderr.strip())
-        raise RuntimeError(f"Alembic upgrade failed: {result.stderr}")
-    logger.info("Alembic migrations complete.")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Run any pending DB migrations
-    run_alembic_upgrade()
-
-    # 2. Seed reference data (idempotent)
+    # 1. Seed reference data (idempotent; alembic migrations run via Dockerfile CMD)
     with SessionLocal() as db:
         seed_reference_data(db)
 
-    # 3. Start the background scheduler
+    # 2. Start the background scheduler
     logger.info("Starting scheduler...")
     scheduler.start()
 
-    # 4. Run an initial data collection on startup
+    # 3. Run an initial data collection on startup
     try:
         collect_data()
     except Exception as e:

@@ -11,7 +11,7 @@ GET /api/commute/trips     — dynamic trip list for a date with U6 connections
 GET /api/commute/earliest-date — earliest service_date in the DB
 """
 
-from datetime import date as date_type
+from datetime import date as date_type, time as time_type
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -33,6 +33,33 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _trip_remarks(db: Session, api_trip_id: str, target_date: str) -> list[dict]:
+    """Return up to 5 active remarks for a trip (via its trip_stops → remarks join)."""
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT r.remark_type, r.remark_text, r.remark_summary
+            FROM remarks r
+            JOIN trip_stops ts ON ts.id = r.entity_id AND r.entity_type = 'trip_stop'
+            JOIN trips tr ON tr.id = ts.trip_id
+            WHERE tr.api_trip_id = :trip_id
+              AND tr.service_date = :service_date
+            ORDER BY r.remark_type, r.remark_text
+            LIMIT 5
+        """),
+        {"trip_id": api_trip_id, "service_date": target_date},
+    ).fetchall()
+    return [
+        {"type": r.remark_type, "text": r.remark_summary or r.remark_text}
+        for r in rows
+    ]
+
+
+def _parse_time(hhmm: str) -> time_type:
+    """Parse 'HH:MM' string to a time object for use as SQL anchor_time."""
+    h, m = hhmm.split(":")
+    return time_type(int(h), int(m))
+
 
 def _slot_today(db: Session, station_id: str, direction: str, line_code: str,
                 target_date: str, anchor_time, tol_sec: int) -> dict:
@@ -299,6 +326,11 @@ def get_commute_trips(
                     "delay_minutes": round(r.delay_t / 60, 1) if r.delay_t is not None else 0,
                     "cancelled": r.status == "cancelled",
                 },
+                "history_30d": _slot_history(
+                    db, TERNITZ_STATION_ID, "to_wien", "CJX",
+                    _parse_time(r.dep_time), 120,
+                ),
+                "remarks": _trip_remarks(db, r.api_trip_id, target_date),
             },
             "wiener_neustadt": {
                 "seen": r.dep_wn is not None,
@@ -331,6 +363,10 @@ def get_commute_trips(
                     "delay_minutes": round(u6.delay / 60, 1) if u6.delay is not None else 0,
                     "cancelled": u6.status == "cancelled",
                 },
+                "history_30d": _slot_history(
+                    db, WIEN_MEIDLING_STATION_ID, "to_wien", "U6",
+                    _parse_time(u6.dep_time), 120,
+                ),
             }
         morning.append(trip)
 
@@ -419,6 +455,11 @@ def get_commute_trips(
                     "delay_minutes": round(r.delay_m / 60, 1) if r.delay_m is not None else 0,
                     "cancelled": r.status == "cancelled",
                 },
+                "history_30d": _slot_history(
+                    db, WIEN_MEIDLING_STATION_ID, "to_ternitz", "CJX",
+                    _parse_time(r.dep_time), 120,
+                ),
+                "remarks": _trip_remarks(db, r.api_trip_id, target_date),
             },
             "wiener_neustadt": {
                 "seen": r.arr_wn is not None,
@@ -451,6 +492,10 @@ def get_commute_trips(
                     "delay_minutes": round(u6.delay / 60, 1) if u6.delay is not None else 0,
                     "cancelled": u6.status == "cancelled",
                 },
+                "history_30d": _slot_history(
+                    db, WIEN_WESTBAHNHOF_STATION_ID, "to_ternitz", "U6",
+                    _parse_time(u6.dep_time), 120,
+                ),
             }
         evening.append(trip)
 
@@ -458,4 +503,148 @@ def get_commute_trips(
         "morning": morning,
         "evening": evening,
         "viewed_date": target_date,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /api/commute/connection-stats
+# ---------------------------------------------------------------------------
+
+@router.get("/commute/connection-stats")
+def get_connection_stats(
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    Calculate how reliably the CJX↔U6 connection is made at Wien Meidling.
+
+    Morning (to_wien): CJX arrives Meidling → 3 min transfer → catches U6.
+      Connection "made" when: (CJX actual_arrival_meidling OR planned) + 3min ≤ U6 planned_departure_meidling.
+
+    Evening (to_ternitz): U6 departs Westbahnhof → 25 min → CJX departs Meidling.
+      Connection "made" when: U6 actual_departure_westbahnhof + 25min ≤ CJX planned_departure_meidling.
+    """
+    # ── MORNING: CJX → U6 at Meidling ──────────────────────────────────────
+    morning_row = db.execute(
+        text("""
+            WITH cjx_trips AS (
+                SELECT
+                    ts_m.actual_arrival                                              AS cjx_arr_actual,
+                    ts_m.planned_arrival                                             AS cjx_arr_planned,
+                    COALESCE(ts_m.actual_arrival, ts_m.planned_arrival)             AS cjx_arr_eff,
+                    (
+                        EXTRACT(HOUR   FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                        + EXTRACT(MINUTE FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')
+                    )                                                                AS dep_ternitz_min
+                FROM trips tr
+                JOIN lines l ON l.id = tr.line_id
+                JOIN trip_stops ts_t ON ts_t.trip_id = tr.id AND ts_t.station_id = :ternitz
+                JOIN trip_stops ts_m ON ts_m.trip_id = tr.id AND ts_m.station_id = :meidling
+                WHERE l.code = 'CJX'
+                  AND tr.direction::text = 'to_wien'
+                  AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
+                  AND ts_m.planned_arrival IS NOT NULL
+            ),
+            u6_trips AS (
+                SELECT
+                    ts.planned_departure                                              AS u6_dep_planned,
+                    (
+                        EXTRACT(HOUR   FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                        + EXTRACT(MINUTE FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna')
+                    )                                                                AS dep_min
+                FROM trip_stops ts
+                JOIN trips tr ON tr.id = ts.trip_id
+                JOIN lines  l ON l.id  = tr.line_id
+                WHERE l.code = 'U6'
+                  AND tr.direction::text = 'to_wien'
+                  AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
+                  AND ts.station_id = :meidling
+                  AND ts.planned_departure IS NOT NULL
+            )
+            SELECT
+                COUNT(c.*) AS total,
+                COUNT(c.*) FILTER (
+                    WHERE EXISTS (
+                        SELECT 1 FROM u6_trips u
+                        WHERE u.dep_min BETWEEN c.dep_ternitz_min + 40 AND c.dep_ternitz_min + 80
+                          AND u.u6_dep_planned >= c.cjx_arr_eff + INTERVAL '3 minutes'
+                    )
+                ) AS made
+            FROM cjx_trips c
+        """),
+        {"ternitz": TERNITZ_STATION_ID, "meidling": WIEN_MEIDLING_STATION_ID, "days": days},
+    ).fetchone()
+
+    # ── EVENING: U6 → CJX at Meidling ──────────────────────────────────────
+    evening_row = db.execute(
+        text("""
+            WITH cjx_trips AS (
+                SELECT
+                    ts_m.planned_departure                                            AS cjx_dep_planned,
+                    (
+                        EXTRACT(HOUR   FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                        + EXTRACT(MINUTE FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')
+                    )                                                                 AS dep_meidling_min
+                FROM trips tr
+                JOIN lines l ON l.id = tr.line_id
+                JOIN trip_stops ts_m ON ts_m.trip_id = tr.id AND ts_m.station_id = :meidling
+                WHERE l.code = 'CJX'
+                  AND tr.direction::text = 'to_ternitz'
+                  AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
+                  AND ts_m.planned_departure IS NOT NULL
+            ),
+            u6_trips AS (
+                SELECT
+                    COALESCE(ts.actual_departure, ts.planned_departure)              AS u6_dep_eff,
+                    (
+                        EXTRACT(HOUR   FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                        + EXTRACT(MINUTE FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna')
+                    )                                                                 AS dep_min
+                FROM trip_stops ts
+                JOIN trips tr ON tr.id = ts.trip_id
+                JOIN lines  l ON l.id  = tr.line_id
+                WHERE l.code = 'U6'
+                  AND tr.direction::text = 'to_ternitz'
+                  AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
+                  AND ts.station_id = :westbahnhof
+                  AND ts.planned_departure IS NOT NULL
+            )
+            SELECT
+                COUNT(c.*) AS total,
+                COUNT(c.*) FILTER (
+                    WHERE EXISTS (
+                        SELECT 1 FROM u6_trips u
+                        WHERE u.dep_min BETWEEN c.dep_meidling_min - 30 AND c.dep_meidling_min - 5
+                          AND u.u6_dep_eff + INTERVAL '25 minutes' <= c.cjx_dep_planned
+                    )
+                ) AS made
+            FROM cjx_trips c
+        """),
+        {"meidling": WIEN_MEIDLING_STATION_ID, "westbahnhof": WIEN_WESTBAHNHOF_STATION_ID, "days": days},
+    ).fetchone()
+
+    def _pct(made, total):
+        return round(made / total * 100, 1) if total else None
+
+    m_total = morning_row.total or 0
+    m_made  = morning_row.made  or 0
+    e_total = evening_row.total or 0
+    e_made  = evening_row.made  or 0
+
+    return {
+        "period_days": days,
+        "morning": {
+            "description": "CJX → U6 (Meidling, to_wien)",
+            "total_observed": m_total,
+            "connection_made": m_made,
+            "connection_missed": m_total - m_made,
+            "connection_made_pct": _pct(m_made, m_total),
+        },
+        "evening": {
+            "description": "U6 → CJX (Meidling, to_ternitz)",
+            "total_observed": e_total,
+            "connection_made": e_made,
+            "connection_missed": e_total - e_made,
+            "connection_made_pct": _pct(e_made, e_total),
+        },
     }
