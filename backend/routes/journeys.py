@@ -7,8 +7,7 @@ to_wien journey (CJX): anchored on Ternitz departures.
 to_ternitz journey (CJX): anchored on Wien Meidling CJX departures.
   Stations tracked: Wien Meidling → Baden → Wiener Neustadt → Ternitz
 
-Diversion detection: a trip that has Ternitz + Meidling observations but NO
-Baden observation is flagged as was_diverted.
+Diversion detection: trips.is_diverted flag (set by the collector).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -18,21 +17,19 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from database import get_db
 from config import (
     TERNITZ_STATION_ID,
     WIEN_MEIDLING_STATION_ID,
-    WIEN_WESTBAHNHOF_STATION_ID,
     WIENER_NEUSTADT_STATION_ID,
     BADEN_STATION_ID,
-    COMMUTE_TIME_TOLERANCE_MINUTES,
 )
+from database import get_db
 
 router = APIRouter()
 
 
 def _parse_days(days_of_week: Optional[str]) -> list[int] | None:
-    """Parse '1,2,3,4,5' → [1,2,3,4,5]. PostgreSQL DOW: 0=Sun,1=Mon,...,6=Sat."""
+    """Parse '1,2,3,4,5' → [1,2,3,4,5]. PostgreSQL DOW: 0=Sun … 6=Sat."""
     if not days_of_week:
         return None
     try:
@@ -83,8 +80,16 @@ def _date_bounds(
     return df, dt
 
 
+def _fmt(ts) -> str | None:
+    return ts.isoformat() if ts else None
+
+
+def _delay_min(s) -> float | None:
+    return round(s / 60, 1) if s is not None else None
+
+
 # ---------------------------------------------------------------------------
-# GET /api/journeys  – CJX journeys (to_wien anchor: Ternitz; to_ternitz: Westbahnhof)
+# GET /api/journeys
 # ---------------------------------------------------------------------------
 
 @router.get("/journeys")
@@ -102,193 +107,139 @@ def get_journeys(
     df, dt = _date_bounds(date_from, date_to, days)
     dow_list = _parse_days(days_of_week)
     time_list = _parse_times(departure_times)
-    tol = COMMUTE_TIME_TOLERANCE_MINUTES
+    tol = 2  # minutes
 
     dow_clause = ""
     if dow_list:
-        dow_clause = "AND EXTRACT(DOW FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna') = ANY(:dow_list)"
+        dow_clause = (
+            "AND EXTRACT(DOW FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna')"
+            " = ANY(:dow_list)"
+        )
 
     time_clause = ""
+    time_list_expanded: list[int] = []
     if time_list:
+        for t in time_list:
+            for off in range(-tol, tol + 1):
+                time_list_expanded.append(t + off)
         time_clause = """
         AND (
-            EXTRACT(HOUR FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna') * 60
-            + EXTRACT(MINUTE FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna')
+            EXTRACT(HOUR   FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+            + EXTRACT(MINUTE FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna')
         ) = ANY(:time_list_expanded)
         """
 
-    # Expand time_list to include ±tol minutes
-    time_list_expanded = []
-    if time_list:
-        for t in time_list:
-            for offset_min in range(-tol, tol + 1):
-                time_list_expanded.append(t + offset_min)
-
     if direction == "to_wien":
-        # Anchor: CJX departures at Ternitz
-        # Route: Ternitz → Wiener Neustadt → Baden → Wien Meidling
+        # Anchor: Ternitz departure
+        # Route: Ternitz(dep) → WienerNeustadt(dep) → Baden(dep) → WienMeidling(arr)
         query = text(f"""
-            WITH anchor AS (
-                SELECT trip_id, line_name, planned_time, actual_time, delay_seconds, cancelled, platform
-                FROM train_observations
-                WHERE station_id = :anchor_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-                  AND planned_time BETWEEN :date_from AND :date_to
-                  {dow_clause}
-                  {time_clause}
-            ),
-            wiener_neustadt AS (
-                SELECT trip_id, planned_time AS planned_time_wn, actual_time AS actual_time_wn,
-                       delay_seconds AS delay_wn, cancelled AS cancelled_wn
-                FROM train_observations
-                WHERE station_id = :wn_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-            ),
-            baden AS (
-                SELECT trip_id, planned_time AS planned_time_b, actual_time AS actual_time_b,
-                       delay_seconds AS delay_b, cancelled AS cancelled_b
-                FROM train_observations
-                WHERE station_id = :baden_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-            ),
-            meidling AS (
-                SELECT trip_id, planned_time AS planned_time_m, actual_time AS actual_time_m,
-                       delay_seconds AS delay_m, cancelled AS cancelled_m
-                FROM train_observations
-                WHERE station_id = :meidling_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-            )
             SELECT
-                anchor.trip_id,
-                anchor.line_name,
-                anchor.planned_time  AS dep_ternitz_planned,
-                anchor.actual_time   AS dep_ternitz_actual,
-                anchor.delay_seconds AS dep_ternitz_delay,
-                anchor.cancelled     AS dep_ternitz_cancelled,
-                anchor.platform      AS dep_ternitz_platform,
-                wn.planned_time_wn AS dep_wn_planned,
-                wn.actual_time_wn  AS dep_wn_actual,
-                wn.delay_wn        AS dep_wn_delay,
-                wn.cancelled_wn    AS dep_wn_cancelled,
-                b.planned_time_b AS dep_baden_planned,
-                b.actual_time_b  AS dep_baden_actual,
-                b.delay_b        AS dep_baden_delay,
-                b.cancelled_b    AS dep_baden_cancelled,
-                m.planned_time_m AS arr_meidling_planned,
-                m.actual_time_m  AS arr_meidling_actual,
-                m.delay_m        AS arr_meidling_delay,
-                m.cancelled_m    AS arr_meidling_cancelled,
-                (b.trip_id IS NULL AND m.trip_id IS NOT NULL) AS was_diverted
-            FROM anchor
-            LEFT JOIN wiener_neustadt wn ON wn.trip_id = anchor.trip_id
-            LEFT JOIN baden b  ON b.trip_id = anchor.trip_id
-            LEFT JOIN meidling m ON m.trip_id = anchor.trip_id
-            ORDER BY anchor.planned_time DESC
+                tr.api_trip_id,
+                l.code                                                                AS line_name,
+                tr.is_diverted                                                        AS was_diverted,
+                -- Ternitz
+                anchor_ts.planned_departure                                           AS dep_ternitz_planned,
+                anchor_ts.actual_departure                                            AS dep_ternitz_actual,
+                anchor_ts.departure_delay_seconds                                     AS dep_ternitz_delay,
+                (tr.status::text = 'cancelled' OR anchor_ts.cancelled_at_stop)       AS dep_ternitz_cancelled,
+                anchor_ts.platform                                                    AS dep_ternitz_platform,
+                -- Wiener Neustadt
+                ts_wn.planned_departure                                               AS dep_wn_planned,
+                ts_wn.actual_departure                                                AS dep_wn_actual,
+                ts_wn.departure_delay_seconds                                         AS dep_wn_delay,
+                ts_wn.cancelled_at_stop                                               AS dep_wn_cancelled,
+                -- Baden
+                ts_b.planned_departure                                                AS dep_baden_planned,
+                ts_b.actual_departure                                                 AS dep_baden_actual,
+                ts_b.departure_delay_seconds                                          AS dep_baden_delay,
+                ts_b.cancelled_at_stop                                                AS dep_baden_cancelled,
+                -- Wien Meidling (arrival)
+                ts_m.planned_arrival                                                  AS arr_meidling_planned,
+                ts_m.actual_arrival                                                   AS arr_meidling_actual,
+                ts_m.arrival_delay_seconds                                            AS arr_meidling_delay,
+                ts_m.cancelled_at_stop                                                AS arr_meidling_cancelled
+            FROM trips tr
+            JOIN lines l ON l.id = tr.line_id
+            JOIN trip_stops anchor_ts ON anchor_ts.trip_id = tr.id
+                                     AND anchor_ts.station_id = :ternitz_station
+            LEFT JOIN trip_stops ts_wn ON ts_wn.trip_id = tr.id AND ts_wn.station_id = :wn_station
+            LEFT JOIN trip_stops ts_b  ON ts_b.trip_id  = tr.id AND ts_b.station_id  = :baden_station
+            LEFT JOIN trip_stops ts_m  ON ts_m.trip_id  = tr.id AND ts_m.station_id  = :meidling_station
+            WHERE tr.direction::text = 'to_wien'
+              AND l.product_type = 'regional'
+              AND anchor_ts.planned_departure BETWEEN :date_from AND :date_to
+              {dow_clause}
+              {time_clause}
+            ORDER BY anchor_ts.planned_departure DESC
             LIMIT :lim OFFSET :off
         """)
     else:
-        # Anchor: CJX departures at Wien Meidling (to_ternitz direction)
-        # Route: Wien Meidling → Baden → Wiener Neustadt → Ternitz
+        # Anchor: Wien Meidling CJX departure
+        # Route: WienMeidling(dep) → Baden(arr) → WienerNeustadt(arr) → Ternitz(arr)
         query = text(f"""
-            WITH anchor AS (
-                SELECT trip_id, line_name, planned_time, actual_time, delay_seconds, cancelled, platform
-                FROM train_observations
-                WHERE station_id = :meidling_station
-                  AND direction = 'to_ternitz'
-                  AND line_product = 'regional'
-                  AND planned_time BETWEEN :date_from AND :date_to
-                  {dow_clause}
-                  {time_clause}
-            ),
-            baden AS (
-                SELECT trip_id, planned_time AS planned_time_b, actual_time AS actual_time_b,
-                       delay_seconds AS delay_b, cancelled AS cancelled_b
-                FROM train_observations
-                WHERE station_id = :baden_station
-                  AND direction = 'to_ternitz'
-                  AND line_product = 'regional'
-            ),
-            wiener_neustadt AS (
-                SELECT trip_id, planned_time AS planned_time_wn, actual_time AS actual_time_wn,
-                       delay_seconds AS delay_wn, cancelled AS cancelled_wn
-                FROM train_observations
-                WHERE station_id = :wn_station
-                  AND direction = 'to_ternitz'
-                  AND line_product = 'regional'
-            ),
-            ternitz AS (
-                SELECT trip_id, planned_time AS planned_time_t, actual_time AS actual_time_t,
-                       delay_seconds AS delay_t, cancelled AS cancelled_t
-                FROM train_observations
-                WHERE station_id = :ternitz_station
-                  AND direction = 'to_ternitz'
-                  AND line_product = 'regional'
-            )
             SELECT
-                anchor.trip_id,
-                anchor.line_name,
-                anchor.planned_time  AS dep_meidling_planned,
-                anchor.actual_time   AS dep_meidling_actual,
-                anchor.delay_seconds AS dep_meidling_delay,
-                anchor.cancelled     AS dep_meidling_cancelled,
-                anchor.platform      AS dep_meidling_platform,
-                b.planned_time_b AS dep_baden_planned,
-                b.actual_time_b  AS dep_baden_actual,
-                b.delay_b        AS dep_baden_delay,
-                b.cancelled_b    AS dep_baden_cancelled,
-                wn.planned_time_wn AS dep_wn_planned,
-                wn.actual_time_wn  AS dep_wn_actual,
-                wn.delay_wn        AS dep_wn_delay,
-                wn.cancelled_wn    AS dep_wn_cancelled,
-                t.planned_time_t AS arr_ternitz_planned,
-                t.actual_time_t  AS arr_ternitz_actual,
-                t.delay_t        AS arr_ternitz_delay,
-                t.cancelled_t    AS arr_ternitz_cancelled,
-                FALSE AS was_diverted
-            FROM anchor
-            LEFT JOIN baden b            ON b.trip_id  = anchor.trip_id
-            LEFT JOIN wiener_neustadt wn ON wn.trip_id = anchor.trip_id
-            LEFT JOIN ternitz t          ON t.trip_id  = anchor.trip_id
-            ORDER BY anchor.planned_time DESC
+                tr.api_trip_id,
+                l.code                                                                AS line_name,
+                tr.is_diverted                                                        AS was_diverted,
+                -- Wien Meidling
+                anchor_ts.planned_departure                                           AS dep_meidling_planned,
+                anchor_ts.actual_departure                                            AS dep_meidling_actual,
+                anchor_ts.departure_delay_seconds                                     AS dep_meidling_delay,
+                (tr.status::text = 'cancelled' OR anchor_ts.cancelled_at_stop)       AS dep_meidling_cancelled,
+                anchor_ts.platform                                                    AS dep_meidling_platform,
+                -- Baden (arrival)
+                ts_b.planned_arrival                                                  AS dep_baden_planned,
+                ts_b.actual_arrival                                                   AS dep_baden_actual,
+                ts_b.arrival_delay_seconds                                            AS dep_baden_delay,
+                ts_b.cancelled_at_stop                                                AS dep_baden_cancelled,
+                -- Wiener Neustadt (arrival)
+                ts_wn.planned_arrival                                                 AS dep_wn_planned,
+                ts_wn.actual_arrival                                                  AS dep_wn_actual,
+                ts_wn.arrival_delay_seconds                                           AS dep_wn_delay,
+                ts_wn.cancelled_at_stop                                               AS dep_wn_cancelled,
+                -- Ternitz (arrival)
+                ts_t.planned_arrival                                                  AS arr_ternitz_planned,
+                ts_t.actual_arrival                                                   AS arr_ternitz_actual,
+                ts_t.arrival_delay_seconds                                            AS arr_ternitz_delay,
+                ts_t.cancelled_at_stop                                                AS arr_ternitz_cancelled
+            FROM trips tr
+            JOIN lines l ON l.id = tr.line_id
+            JOIN trip_stops anchor_ts ON anchor_ts.trip_id = tr.id
+                                      AND anchor_ts.station_id = :meidling_station
+            LEFT JOIN trip_stops ts_b  ON ts_b.trip_id  = tr.id AND ts_b.station_id  = :baden_station
+            LEFT JOIN trip_stops ts_wn ON ts_wn.trip_id = tr.id AND ts_wn.station_id = :wn_station
+            LEFT JOIN trip_stops ts_t  ON ts_t.trip_id  = tr.id AND ts_t.station_id  = :ternitz_station
+            WHERE tr.direction::text = 'to_ternitz'
+              AND l.product_type = 'regional'
+              AND anchor_ts.planned_departure BETWEEN :date_from AND :date_to
+              {dow_clause}
+              {time_clause}
+            ORDER BY anchor_ts.planned_departure DESC
             LIMIT :lim OFFSET :off
         """)
 
     params: dict = {
-        "meidling_station": WIEN_MEIDLING_STATION_ID,
+        "ternitz_station": TERNITZ_STATION_ID,
         "wn_station": WIENER_NEUSTADT_STATION_ID,
         "baden_station": BADEN_STATION_ID,
+        "meidling_station": WIEN_MEIDLING_STATION_ID,
         "date_from": df,
         "date_to": dt,
         "lim": limit,
         "off": offset,
     }
-    if direction == "to_wien":
-        params["anchor_station"] = TERNITZ_STATION_ID
-    else:
-        params["ternitz_station"] = TERNITZ_STATION_ID
-
     if dow_list:
         params["dow_list"] = dow_list
     if time_list_expanded:
         params["time_list_expanded"] = time_list_expanded
 
     rows = db.execute(query, params).fetchall()
-
-    def _fmt(ts) -> str | None:
-        return ts.isoformat() if ts else None
-
-    def _delay_min(s) -> float | None:
-        return round(s / 60, 1) if s is not None else None
-
     result = []
+
     for r in rows:
         if direction == "to_wien":
             result.append({
-                "trip_id": r.trip_id,
+                "trip_id": r.api_trip_id,
                 "line_name": r.line_name,
                 "direction": "to_wien",
                 "was_diverted": bool(r.was_diverted),
@@ -329,10 +280,10 @@ def get_journeys(
             })
         else:
             result.append({
-                "trip_id": r.trip_id,
+                "trip_id": r.api_trip_id,
                 "line_name": r.line_name,
                 "direction": "to_ternitz",
-                "was_diverted": False,
+                "was_diverted": bool(r.was_diverted),
                 "stations": {
                     "wien_meidling": {
                         "planned": _fmt(r.dep_meidling_planned),
@@ -373,7 +324,7 @@ def get_journeys(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/journeys/stats  – aggregated stats for filtered journey set
+# GET /api/journeys/stats
 # ---------------------------------------------------------------------------
 
 @router.get("/journeys/stats")
@@ -389,94 +340,84 @@ def get_journey_stats(
     df, dt = _date_bounds(date_from, date_to, days)
     dow_list = _parse_days(days_of_week)
     time_list = _parse_times(departure_times)
-    tol = COMMUTE_TIME_TOLERANCE_MINUTES
+    tol = 2
 
     dow_clause = ""
     if dow_list:
-        dow_clause = "AND EXTRACT(DOW FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna') = ANY(:dow_list)"
+        dow_clause = (
+            "AND EXTRACT(DOW FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna')"
+            " = ANY(:dow_list)"
+        )
 
     time_clause = ""
-    time_list_expanded = []
+    time_list_expanded: list[int] = []
     if time_list:
         for t in time_list:
-            for offset_min in range(-tol, tol + 1):
-                time_list_expanded.append(t + offset_min)
+            for off in range(-tol, tol + 1):
+                time_list_expanded.append(t + off)
         time_clause = """
         AND (
-            EXTRACT(HOUR FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna') * 60
-            + EXTRACT(MINUTE FROM anchor.planned_time AT TIME ZONE 'Europe/Vienna')
+            EXTRACT(HOUR   FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+            + EXTRACT(MINUTE FROM anchor_ts.planned_departure AT TIME ZONE 'Europe/Vienna')
         ) = ANY(:time_list_expanded)
         """
 
-    if direction == "to_wien":
-        anchor_station = TERNITZ_STATION_ID
-        anchor_product = "regional"
-        anchor_dir = "to_wien"
-    else:
-        anchor_station = WIEN_MEIDLING_STATION_ID
-        anchor_product = "regional"
-        anchor_dir = "to_ternitz"
+    anchor_station = TERNITZ_STATION_ID if direction == "to_wien" else WIEN_MEIDLING_STATION_ID
+    delay_field_anchor = "anchor_ts.departure_delay_seconds"
+    delay_field_meidling = (
+        "ts_m.arrival_delay_seconds" if direction == "to_wien" else "ts_m.departure_delay_seconds"
+    )
 
-    query = text(f"""
-        WITH anchor AS (
-            SELECT trip_id, delay_seconds AS delay_anchor, cancelled
-            FROM train_observations
-            WHERE station_id = :anchor_station
-              AND direction = :anchor_dir
-              AND line_product = :anchor_product
-              AND planned_time BETWEEN :date_from AND :date_to
-              {dow_clause}
-              {time_clause}
-        ),
-        meidling AS (
-            SELECT trip_id, delay_seconds AS delay_m, cancelled AS cancelled_m
-            FROM train_observations
-            WHERE station_id = :meidling_station
-              AND direction = :anchor_dir
-              AND line_product = :anchor_product
-        ),
-        baden AS (
-            SELECT trip_id
-            FROM train_observations
-            WHERE station_id = :baden_station
-              AND direction = 'to_wien'
-              AND line_product = 'regional'
-        )
-        SELECT
-            COUNT(DISTINCT anchor.trip_id) AS total_journeys,
-            COUNT(DISTINCT anchor.trip_id) FILTER (WHERE anchor.cancelled = TRUE) AS cancelled_count,
-            ROUND(AVG(anchor.delay_anchor) FILTER (WHERE anchor.cancelled = FALSE AND anchor.delay_anchor IS NOT NULL), 1) AS avg_delay_anchor,
-            ROUND(AVG(m.delay_m) FILTER (WHERE m.delay_m IS NOT NULL), 1) AS avg_delay_meidling,
-            COUNT(DISTINCT anchor.trip_id) FILTER (
-                WHERE anchor.cancelled = FALSE AND (anchor.delay_anchor IS NULL OR anchor.delay_anchor < 60)
-            ) AS on_time_count,
-            COUNT(DISTINCT anchor.trip_id) FILTER (
-                WHERE m.trip_id IS NULL AND b.trip_id IS NOT NULL
-            ) AS has_meidling_no_anchor,
-            COUNT(DISTINCT anchor.trip_id) FILTER (
-                WHERE :is_to_wien AND m.trip_id IS NOT NULL AND b.trip_id IS NULL
-            ) AS diversion_count
-        FROM anchor
-        LEFT JOIN meidling m ON m.trip_id = anchor.trip_id
-        LEFT JOIN baden b ON b.trip_id = anchor.trip_id
-    """)
+    row = db.execute(
+        text(f"""
+            WITH anchor AS (
+                SELECT tr.id AS trip_id,
+                       {delay_field_anchor}               AS delay_anchor,
+                       (tr.status::text = 'cancelled')    AS cancelled,
+                       tr.is_diverted
+                FROM trips tr
+                JOIN lines l ON l.id = tr.line_id
+                JOIN trip_stops anchor_ts ON anchor_ts.trip_id = tr.id
+                                         AND anchor_ts.station_id = :anchor_station
+                WHERE tr.direction::text = :direction
+                  AND l.product_type = 'regional'
+                  AND anchor_ts.planned_departure BETWEEN :date_from AND :date_to
+                  {dow_clause}
+                  {time_clause}
+            ),
+            meidling AS (
+                SELECT trip_id, {delay_field_meidling} AS delay_m
+                FROM trip_stops ts_m
+                WHERE ts_m.station_id = :meidling_station
+            )
+            SELECT
+                COUNT(DISTINCT anchor.trip_id)                                              AS total_journeys,
+                COUNT(DISTINCT anchor.trip_id) FILTER (WHERE anchor.cancelled)              AS cancelled_count,
+                ROUND(
+                    AVG(anchor.delay_anchor)
+                    FILTER (WHERE NOT anchor.cancelled AND anchor.delay_anchor IS NOT NULL),
+                    1
+                )                                                                           AS avg_delay_anchor,
+                ROUND(AVG(m.delay_m) FILTER (WHERE m.delay_m IS NOT NULL), 1)              AS avg_delay_meidling,
+                COUNT(DISTINCT anchor.trip_id) FILTER (
+                    WHERE NOT anchor.cancelled
+                      AND (anchor.delay_anchor IS NULL OR anchor.delay_anchor < 60)
+                )                                                                           AS on_time_count,
+                COUNT(DISTINCT anchor.trip_id) FILTER (WHERE anchor.is_diverted)           AS diversion_count
+            FROM anchor
+            LEFT JOIN meidling m ON m.trip_id = anchor.trip_id
+        """),
+        {
+            "anchor_station": anchor_station,
+            "meidling_station": WIEN_MEIDLING_STATION_ID,
+            "direction": direction,
+            "date_from": df,
+            "date_to": dt,
+            **({"dow_list": dow_list} if dow_list else {}),
+            **({"time_list_expanded": time_list_expanded} if time_list_expanded else {}),
+        },
+    ).fetchone()
 
-    params: dict = {
-        "anchor_station": anchor_station,
-        "anchor_product": anchor_product,
-        "anchor_dir": anchor_dir,
-        "meidling_station": WIEN_MEIDLING_STATION_ID,
-        "baden_station": BADEN_STATION_ID,
-        "date_from": df,
-        "date_to": dt,
-        "is_to_wien": direction == "to_wien",
-    }
-    if dow_list:
-        params["dow_list"] = dow_list
-    if time_list_expanded:
-        params["time_list_expanded"] = time_list_expanded
-
-    row = db.execute(query, params).fetchone()
     total = row.total_journeys or 0
     non_cancelled = total - (row.cancelled_count or 0)
     avg_anchor = float(row.avg_delay_anchor) if row.avg_delay_anchor else 0
@@ -498,7 +439,7 @@ def get_journey_stats(
 
 
 # ---------------------------------------------------------------------------
-# GET /api/diversions  – list of detected route diversions (CJX skipped Baden)
+# GET /api/diversions
 # ---------------------------------------------------------------------------
 
 @router.get("/diversions")
@@ -506,54 +447,30 @@ def get_diversions(
     days: int = Query(90, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
+    """List CJX trips that were diverted (skipped Baden bei Wien).
+
+    Uses the is_diverted flag set by the collector — no CTE needed in V2.
+    """
     result = db.execute(
         text("""
-            WITH ternitz_trips AS (
-                SELECT DISTINCT ON (trip_id) trip_id, line_name, planned_time, delay_seconds, cancelled
-                FROM train_observations
-                WHERE station_id = :ternitz_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-                  AND planned_time >= NOW() - MAKE_INTERVAL(days => :days)
-                ORDER BY trip_id, last_updated_at DESC
-            ),
-            meidling_trips AS (
-                SELECT DISTINCT trip_id FROM train_observations
-                WHERE station_id = :meidling_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-            ),
-            baden_trips AS (
-                SELECT DISTINCT trip_id FROM train_observations
-                WHERE station_id = :baden_station
-                  AND direction = 'to_wien'
-            ),
-            meidling_delay AS (
-                SELECT DISTINCT ON (trip_id) trip_id, delay_seconds AS meidling_delay
-                FROM train_observations
-                WHERE station_id = :meidling_station
-                  AND direction = 'to_wien'
-                  AND line_product = 'regional'
-                ORDER BY trip_id, last_updated_at DESC
-            )
             SELECT
-                t.trip_id,
-                t.line_name,
-                t.planned_time,
-                t.delay_seconds AS ternitz_delay,
-                md.meidling_delay
-            FROM ternitz_trips t
-            JOIN meidling_trips m ON m.trip_id = t.trip_id
-            LEFT JOIN meidling_delay md ON md.trip_id = t.trip_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM baden_trips b WHERE b.trip_id = t.trip_id
-            )
-            ORDER BY t.planned_time DESC
+                tr.api_trip_id                          AS trip_id,
+                l.code                                  AS line_name,
+                ts_t.planned_departure,
+                ts_t.departure_delay_seconds            AS ternitz_delay,
+                ts_m.arrival_delay_seconds              AS meidling_delay
+            FROM trips tr
+            JOIN lines l ON l.id = tr.line_id
+            JOIN trip_stops ts_t ON ts_t.trip_id = tr.id AND ts_t.station_id = :ternitz_station
+            LEFT JOIN trip_stops ts_m ON ts_m.trip_id = tr.id AND ts_m.station_id = :meidling_station
+            WHERE tr.is_diverted = TRUE
+              AND tr.direction::text = 'to_wien'
+              AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
+            ORDER BY ts_t.planned_departure DESC
         """),
         {
             "ternitz_station": TERNITZ_STATION_ID,
             "meidling_station": WIEN_MEIDLING_STATION_ID,
-            "baden_station": BADEN_STATION_ID,
             "days": days,
         },
     ).fetchall()
@@ -562,8 +479,8 @@ def get_diversions(
         {
             "trip_id": r.trip_id,
             "line_name": r.line_name,
-            "date": r.planned_time.date().isoformat() if r.planned_time else None,
-            "planned_departure": r.planned_time.strftime("%H:%M") if r.planned_time else None,
+            "date": r.planned_departure.date().isoformat() if r.planned_departure else None,
+            "planned_departure": r.planned_departure.strftime("%H:%M") if r.planned_departure else None,
             "ternitz_delay_minutes": round(r.ternitz_delay / 60, 1) if r.ternitz_delay else 0,
             "meidling_delay_minutes": round(r.meidling_delay / 60, 1) if r.meidling_delay else None,
         }
