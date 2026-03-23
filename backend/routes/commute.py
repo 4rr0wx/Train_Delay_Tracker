@@ -156,12 +156,15 @@ def _get_trip_id(
 
 def _trip_station(db: Session, trip_id: str | None, station_id: str, direction: str) -> dict:
     """Return delay status for a specific trip (by trip_id) at an intermediate station."""
-    _empty = {"seen": False, "delay_seconds": None, "delay_minutes": None, "cancelled": None}
+    _empty = {"seen": False, "delay_seconds": None, "delay_minutes": None,
+              "cancelled": None, "planned_time_local": None}
     if not trip_id:
         return _empty
     row = db.execute(
         text("""
-            SELECT delay_seconds, cancelled FROM train_observations
+            SELECT delay_seconds, cancelled,
+                   TO_CHAR(planned_time AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS planned_time_local
+            FROM train_observations
             WHERE trip_id = :tid AND station_id = :sid AND direction = :dir
               AND line_product = 'regional'
             ORDER BY last_updated_at DESC LIMIT 1
@@ -176,6 +179,7 @@ def _trip_station(db: Session, trip_id: str | None, station_id: str, direction: 
         "delay_seconds": ds,
         "delay_minutes": round(ds / 60, 1) if ds is not None else 0,
         "cancelled": row.cancelled,
+        "planned_time_local": row.planned_time_local,
     }
 
 
