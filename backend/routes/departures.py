@@ -1,73 +1,86 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import Optional
 
-from database import get_db
 from config import TERNITZ_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID, WIEN_MEIDLING_STATION_ID
+from database import get_db
 
 router = APIRouter()
 
 
 @router.get("/departures")
 def get_departures(
-    direction: str = Query("to_wien", regex="^(to_wien|to_ternitz)$"),
+    direction: str = Query("to_wien", pattern="^(to_wien|to_ternitz)$"),
     limit: int = Query(20, ge=1, le=100),
     product: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    pc = "AND t.line_product = :product" if product else ""
+    pc = "AND l.product_type = :product" if product else ""
 
-    # Status filter: on_time (<60s delay), delayed (>=60s), cancelled
+    # Status filter — maps V1 semantics onto V2 columns
     sc = ""
     if status == "on_time":
-        sc = "AND t.cancelled = FALSE AND (t.delay_seconds IS NULL OR t.delay_seconds < 60)"
+        sc = (
+            "AND tr.status::text != 'cancelled'"
+            " AND ts.cancelled_at_stop = FALSE"
+            " AND (ts.departure_delay_seconds IS NULL OR ts.departure_delay_seconds < 60)"
+        )
     elif status == "delayed":
-        sc = "AND t.cancelled = FALSE AND t.delay_seconds IS NOT NULL AND t.delay_seconds >= 60"
+        sc = (
+            "AND tr.status::text != 'cancelled'"
+            " AND ts.cancelled_at_stop = FALSE"
+            " AND ts.departure_delay_seconds >= 60"
+        )
     elif status == "cancelled":
-        sc = "AND t.cancelled = TRUE"
+        sc = "AND (tr.status::text = 'cancelled' OR ts.cancelled_at_stop = TRUE)"
 
-    # Show only origin-station observations to avoid counting intermediate stops.
+    # Show origin-station observations only to avoid inflating per-trip counts
     # to_wien:    CJX origin = Ternitz
-    # to_ternitz: U6 origin = Westbahnhof, CJX origin = Wien Meidling
+    # to_ternitz: U6 origin  = Westbahnhof, CJX origin = Wien Meidling
     if direction == "to_wien":
         origin_stations = [TERNITZ_STATION_ID]
     else:
         origin_stations = [WIEN_WESTBAHNHOF_STATION_ID, WIEN_MEIDLING_STATION_ID]
 
-    # DISTINCT ON deduplicates: if the same trip has both an arrival and a departure
-    # row at the same station (legacy data), keep only the departure (latest planned_time).
-    # Wrapped in subquery so we can re-sort by planned_time and apply LIMIT.
     result = db.execute(
         text(f"""
             SELECT * FROM (
-                SELECT DISTINCT ON (t.trip_id)
-                    t.trip_id,
-                    t.train_number,
-                    t.line_name,
-                    t.line_product,
-                    t.destination,
-                    t.planned_time,
-                    t.actual_time,
-                    t.delay_seconds,
-                    t.cancelled,
-                    t.platform,
-                    t.station_id,
-                    s.name AS station_name
-                FROM train_observations t
-                LEFT JOIN stations s ON s.id = t.station_id
-                WHERE t.direction = :direction
-                  AND t.station_id = ANY(:origin_stations)
+                SELECT DISTINCT ON (tr.api_trip_id)
+                    tr.api_trip_id                                              AS trip_id,
+                    tr.train_number,
+                    l.code                                                      AS line_name,
+                    l.product_type                                              AS line_product,
+                    tr.destination_name                                         AS destination,
+                    ts.planned_departure                                        AS planned_time,
+                    ts.actual_departure                                         AS actual_time,
+                    ts.departure_delay_seconds                                  AS delay_seconds,
+                    (tr.status::text = 'cancelled' OR ts.cancelled_at_stop)    AS cancelled,
+                    ts.platform,
+                    ts.station_id,
+                    s.name                                                      AS station_name
+                FROM trip_stops ts
+                JOIN trips    tr ON tr.id  = ts.trip_id
+                JOIN lines     l ON l.id   = tr.line_id
+                JOIN stations  s ON s.id   = ts.station_id
+                WHERE tr.direction::text = :direction
+                  AND ts.station_id = ANY(:origin_stations)
+                  AND ts.planned_departure IS NOT NULL
                   {pc}
                   {sc}
-                ORDER BY t.trip_id, t.planned_time DESC
+                ORDER BY tr.api_trip_id, ts.planned_departure DESC
             ) sub
             ORDER BY planned_time DESC
             LIMIT :limit
         """),
-        {"direction": direction, "limit": limit, "product": product,
-         "origin_stations": origin_stations},
+        {
+            "direction": direction,
+            "limit": limit,
+            "product": product,
+            "origin_stations": origin_stations,
+        },
     )
 
     rows = result.fetchall()

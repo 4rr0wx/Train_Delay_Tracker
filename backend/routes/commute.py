@@ -1,12 +1,14 @@
 """
-Overview endpoint for the user's specific commute trains.
+Commute-specific endpoints.
 
-Morning journeys:
-  CJX 07:11 ab Ternitz → Wien Meidling, dann U6 08:01 → Wien Westbahnhof
-  CJX 07:40 ab Ternitz → Wien Meidling, dann U6 08:30 → Wien Westbahnhof
+Commute slots (anchor legs) are defined in the commute_slots DB table (seeded via seed.py):
+  - "Morning CJX 07:11" — CJX from Ternitz to_wien at 07:11
+  - "Morning CJX 07:40" — CJX from Ternitz to_wien at 07:40
+  - "Evening U6 16:15"  — U6 from Wien Westbahnhof to_ternitz at 16:15
 
-Evening journey:
-  U6 16:15 ab Wien Westbahnhof → Wien Meidling, dann CJX 16:35 → Ternitz
+GET /api/commute/overview  — per-slot status for today (or a given date)
+GET /api/commute/trips     — dynamic trip list for a date with U6 connections
+GET /api/commute/earliest-date — earliest service_date in the DB
 """
 
 from datetime import date as date_type
@@ -16,67 +18,54 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from database import get_db
 from config import (
-    MORNING_JOURNEYS, EVENING_JOURNEY, COMMUTE_TIME_TOLERANCE_MINUTES,
-    TERNITZ_STATION_ID, WIEN_MEIDLING_STATION_ID, WIEN_WESTBAHNHOF_STATION_ID,
-    WIENER_NEUSTADT_STATION_ID, BADEN_STATION_ID,
+    TERNITZ_STATION_ID,
+    WIEN_MEIDLING_STATION_ID,
+    WIEN_WESTBAHNHOF_STATION_ID,
+    WIENER_NEUSTADT_STATION_ID,
+    BADEN_STATION_ID,
 )
+from database import get_db
 
 router = APIRouter()
 
 
-def _parse_hhmm(t: str) -> tuple[int, int]:
-    h, m = t.split(":")
-    return int(h), int(m)
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-
-def _today_status(
-    db: Session,
-    direction: str,
-    product: str,
-    hour: int,
-    minute: int,
-    target_date: str | None = None,
-    station_id: str | None = None,
-) -> dict:
-    """Get the latest observation for a specific scheduled departure on the given date (default: today)."""
-    tol = COMMUTE_TIME_TOLERANCE_MINUTES
-    station_clause = "AND station_id = :station_id" if station_id else ""
-    date_clause = (
-        "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :target_date"
-        if target_date else
-        "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = CURRENT_DATE"
-    )
-    params: dict = {
-        "dir": direction,
-        "product": product,
-        "hour": hour,
-        "minute": minute,
-        "tol": tol,
-        "station_id": station_id,
-    }
-    if target_date:
-        params["target_date"] = target_date
-
-    result = db.execute(
-        text(f"""
-            SELECT delay_seconds, cancelled, last_updated_at
-            FROM train_observations
-            WHERE direction = :dir
-              AND line_product = :product
-              {station_clause}
-              {date_clause}
-              AND (
-                EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
-                EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
-              ) BETWEEN (:hour * 60 + :minute - :tol) AND (:hour * 60 + :minute + :tol)
-            ORDER BY last_updated_at DESC
+def _slot_today(db: Session, station_id: str, direction: str, line_code: str,
+                target_date: str, anchor_time, tol_sec: int) -> dict:
+    """Return today's delay status for one commute slot."""
+    row = db.execute(
+        text("""
+            SELECT ts.departure_delay_seconds AS delay_seconds,
+                   tr.status::text             AS status,
+                   ts.last_updated_at
+            FROM trip_stops ts
+            JOIN trips tr ON tr.id = ts.trip_id
+            JOIN lines  l ON l.id  = tr.line_id
+            WHERE ts.station_id          = :station_id
+              AND tr.direction::text     = :direction
+              AND l.code                 = :line_code
+              AND tr.service_date        = :target_date
+              AND ts.planned_departure  IS NOT NULL
+              AND ABS(EXTRACT(EPOCH FROM (
+                  (ts.planned_departure AT TIME ZONE 'Europe/Vienna')::time - :anchor_time
+              ))) <= :tol_sec
+            ORDER BY ts.last_updated_at DESC
             LIMIT 1
         """),
-        params,
-    )
-    row = result.fetchone()
+        {
+            "station_id": station_id,
+            "direction": direction,
+            "line_code": line_code,
+            "target_date": target_date,
+            "anchor_time": anchor_time,
+            "tol_sec": tol_sec,
+        },
+    ).fetchone()
+
     if not row:
         return {"seen_today": False, "delay_seconds": None, "delay_minutes": None, "cancelled": None}
 
@@ -85,182 +74,134 @@ def _today_status(
         "seen_today": True,
         "delay_seconds": delay_s,
         "delay_minutes": round(delay_s / 60, 1) if delay_s is not None else 0,
-        "cancelled": row.cancelled,
+        "cancelled": row.status == "cancelled",
         "last_updated_at": row.last_updated_at.isoformat() if row.last_updated_at else None,
     }
 
 
-def _history(db: Session, direction: str, product: str, hour: int, minute: int, station_id: str | None = None) -> dict:
-    """Aggregate stats for a specific departure slot over the last 30 days."""
-    tol = COMMUTE_TIME_TOLERANCE_MINUTES
-    station_clause = "AND station_id = :station_id" if station_id else ""
-    result = db.execute(
-        text(f"""
+def _slot_history(db: Session, station_id: str, direction: str, line_code: str,
+                  anchor_time, tol_sec: int) -> dict:
+    """Return 30-day aggregated stats for one commute slot."""
+    row = db.execute(
+        text("""
             SELECT
-                COUNT(*) AS total,
-                COUNT(*) FILTER (WHERE cancelled = TRUE) AS cancelled_count,
-                ROUND(AVG(delay_seconds) FILTER (WHERE cancelled = FALSE AND delay_seconds IS NOT NULL), 1) AS avg_delay,
+                COUNT(*)                                                                              AS total,
+                COUNT(*) FILTER (WHERE tr.status::text = 'cancelled' OR ts.cancelled_at_stop)        AS cancelled_count,
+                ROUND(
+                    AVG(ts.departure_delay_seconds)
+                    FILTER (WHERE tr.status::text != 'cancelled' AND ts.departure_delay_seconds IS NOT NULL),
+                    1
+                )                                                                                     AS avg_delay,
                 COUNT(*) FILTER (
-                    WHERE cancelled = FALSE AND (delay_seconds IS NULL OR delay_seconds < 60)
-                ) AS on_time_count,
-                COUNT(*) FILTER (WHERE cancelled = FALSE) AS non_cancelled
-            FROM train_observations
-            WHERE direction = :dir
-              AND line_product = :product
-              {station_clause}
-              AND planned_time >= NOW() - INTERVAL '30 days'
-              AND (
-                EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
-                EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
-              ) BETWEEN (:hour * 60 + :minute - :tol) AND (:hour * 60 + :minute + :tol)
+                    WHERE tr.status::text != 'cancelled'
+                      AND ts.cancelled_at_stop = FALSE
+                      AND (ts.departure_delay_seconds IS NULL OR ts.departure_delay_seconds < 60)
+                )                                                                                     AS on_time_count,
+                COUNT(*) FILTER (WHERE tr.status::text != 'cancelled')                               AS non_cancelled
+            FROM trip_stops ts
+            JOIN trips tr ON tr.id = ts.trip_id
+            JOIN lines  l ON l.id  = tr.line_id
+            WHERE ts.station_id        = :station_id
+              AND tr.direction::text   = :direction
+              AND l.code               = :line_code
+              AND tr.service_date     >= CURRENT_DATE - INTERVAL '30 days'
+              AND ts.planned_departure IS NOT NULL
+              AND ABS(EXTRACT(EPOCH FROM (
+                  (ts.planned_departure AT TIME ZONE 'Europe/Vienna')::time - :anchor_time
+              ))) <= :tol_sec
         """),
-        {"dir": direction, "product": product, "hour": hour, "minute": minute,
-         "tol": tol, "station_id": station_id},
-    )
-    row = result.fetchone()
-    total = row.total or 0
-    non_cancelled = row.non_cancelled or 0
+        {
+            "station_id": station_id,
+            "direction": direction,
+            "line_code": line_code,
+            "anchor_time": anchor_time,
+            "tol_sec": tol_sec,
+        },
+    ).fetchone()
 
+    total = row.total or 0
+    nc = row.non_cancelled or 0
     return {
         "total_observed": total,
         "cancelled_count": row.cancelled_count or 0,
         "cancellation_rate_pct": round((row.cancelled_count or 0) / total * 100, 1) if total > 0 else 0,
         "avg_delay_minutes": round(float(row.avg_delay) / 60, 1) if row.avg_delay else 0,
-        "on_time_pct": round((row.on_time_count or 0) / non_cancelled * 100, 1) if non_cancelled > 0 else 0,
+        "on_time_pct": round((row.on_time_count or 0) / nc * 100, 1) if nc > 0 else 0,
     }
 
 
-def _get_trip_id(
-    db: Session, direction: str, product: str, station_id: str,
-    hour: int, minute: int, target_date: str,
-) -> str | None:
-    """Return the trip_id of the train matching a departure slot on a given date."""
-    tol = COMMUTE_TIME_TOLERANCE_MINUTES
-    row = db.execute(
-        text("""
-            SELECT trip_id FROM train_observations
-            WHERE direction = :dir AND line_product = :product
-              AND station_id = :sid
-              AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :date
-              AND (
-                EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
-                EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
-              ) BETWEEN :t - :tol AND :t + :tol
-            ORDER BY last_updated_at DESC LIMIT 1
-        """),
-        {"dir": direction, "product": product, "sid": station_id,
-         "date": target_date, "t": hour * 60 + minute, "tol": tol},
-    ).fetchone()
-    return row.trip_id if row else None
-
-
-def _trip_station(db: Session, trip_id: str | None, station_id: str, direction: str) -> dict:
-    """Return delay status for a specific trip (by trip_id) at an intermediate station."""
-    _empty = {"seen": False, "delay_seconds": None, "delay_minutes": None,
-              "cancelled": None, "planned_time_local": None}
-    if not trip_id:
-        return _empty
-    row = db.execute(
-        text("""
-            SELECT delay_seconds, cancelled,
-                   TO_CHAR(planned_time AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS planned_time_local
-            FROM train_observations
-            WHERE trip_id = :tid AND station_id = :sid AND direction = :dir
-              AND line_product = 'regional'
-            ORDER BY last_updated_at DESC LIMIT 1
-        """),
-        {"tid": trip_id, "sid": station_id, "dir": direction},
-    ).fetchone()
-    if not row:
-        return _empty
-    ds = row.delay_seconds
-    return {
-        "seen": True,
-        "delay_seconds": ds,
-        "delay_minutes": round(ds / 60, 1) if ds is not None else 0,
-        "cancelled": row.cancelled,
-        "planned_time_local": row.planned_time_local,
-    }
-
+# ---------------------------------------------------------------------------
+# GET /api/commute/earliest-date
+# ---------------------------------------------------------------------------
 
 @router.get("/commute/earliest-date")
 def get_earliest_date(db: Session = Depends(get_db)):
-    """Return the earliest date for which observations exist — used for back-navigation boundary."""
-    result = db.execute(text("""
-        SELECT DATE(MIN(planned_time) AT TIME ZONE 'Europe/Vienna') AS earliest
-        FROM train_observations
-    """))
-    row = result.fetchone()
+    """Return the earliest service_date in the DB — used for back-navigation boundary."""
+    row = db.execute(text("SELECT MIN(service_date) AS earliest FROM service_days")).fetchone()
     return {"earliest_date": row.earliest.isoformat() if row and row.earliest else None}
 
+
+# ---------------------------------------------------------------------------
+# GET /api/commute/overview
+# ---------------------------------------------------------------------------
 
 @router.get("/commute/overview")
 def get_commute_overview(
     date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     db: Session = Depends(get_db),
 ):
-    morning = []
-    for journey in MORNING_JOURNEYS:
-        cjx_h, cjx_m = _parse_hhmm(journey["cjx_dep"])
-        u6_h,  u6_m  = _parse_hhmm(journey["u6_dep"])
-        morning.append({
-            "cjx_dep": journey["cjx_dep"],
-            "u6_dep": journey["u6_dep"],
-            "cjx": {
-                "planned_departure": journey["cjx_dep"],
-                "direction": "to_wien",
-                "from_station": "Ternitz",
-                "to_station": "Wien Meidling",
-                "line": "CJX",
-                "product": "regional",
-                "today": _today_status(db, "to_wien", "regional", cjx_h, cjx_m, target_date=date),
-                "history_30d": _history(db, "to_wien", "regional", cjx_h, cjx_m),
-            },
-            "u6": {
-                "planned_departure": journey["u6_dep"],
-                "direction": "to_wien",
-                "from_station": "Wien Meidling",
-                "to_station": "Wien Westbahnhof",
-                "line": "U6",
-                "product": "subway",
-                "today": _today_status(db, "to_wien", "subway", u6_h, u6_m, target_date=date),
-                "history_30d": _history(db, "to_wien", "subway", u6_h, u6_m),
-            },
+    """Per-slot status for today (or a given date), read from commute_slots table."""
+    target_date = date or date_type.today().isoformat()
+
+    slots = db.execute(
+        text("""
+            SELECT cs.name,
+                   cs.direction::text      AS direction,
+                   cs.anchor_station_id,
+                   cs.anchor_time_local,
+                   cs.time_tolerance_minutes,
+                   l.code                  AS line_code,
+                   l.product_type,
+                   s.name                  AS station_name
+            FROM commute_slots cs
+            JOIN routes    r ON r.id  = cs.route_id
+            JOIN lines     l ON l.id  = r.line_id
+            JOIN stations  s ON s.id  = cs.anchor_station_id
+            WHERE cs.is_active = TRUE
+            ORDER BY cs.anchor_time_local
+        """)
+    ).fetchall()
+
+    result = []
+    for slot in slots:
+        tol_sec = slot.time_tolerance_minutes * 60
+        anchor_time = slot.anchor_time_local
+        anchor_time_str = str(anchor_time)[:5]  # 'HH:MM'
+
+        result.append({
+            "name": slot.name,
+            "direction": slot.direction,
+            "line": slot.line_code,
+            "product": slot.product_type,
+            "anchor_time_local": anchor_time_str,
+            "anchor_station": slot.station_name,
+            "planned_departure": anchor_time_str,
+            "today": _slot_today(
+                db, slot.anchor_station_id, slot.direction, slot.line_code,
+                target_date, anchor_time, tol_sec,
+            ),
+            "history_30d": _slot_history(
+                db, slot.anchor_station_id, slot.direction, slot.line_code,
+                anchor_time, tol_sec,
+            ),
         })
 
-    u6_h,  u6_m  = _parse_hhmm(EVENING_JOURNEY["u6_dep"])
-    cjx_h, cjx_m = _parse_hhmm(EVENING_JOURNEY["cjx_dep"])
-    evening = {
-        "u6_dep": EVENING_JOURNEY["u6_dep"],
-        "cjx_dep": EVENING_JOURNEY["cjx_dep"],
-        "u6": {
-            "planned_departure": EVENING_JOURNEY["u6_dep"],
-            "direction": "to_ternitz",
-            "from_station": "Wien Westbahnhof",
-            "to_station": "Wien Meidling",
-            "line": "U6",
-            "product": "subway",
-            "today": _today_status(db, "to_ternitz", "subway", u6_h, u6_m, target_date=date),
-            "history_30d": _history(db, "to_ternitz", "subway", u6_h, u6_m),
-        },
-        "cjx": {
-            "planned_departure": EVENING_JOURNEY["cjx_dep"],
-            "direction": "to_ternitz",
-            "from_station": "Wien Meidling",
-            "to_station": "Ternitz",
-            "line": "CJX",
-            "product": "regional",
-            "today": _today_status(db, "to_ternitz", "regional", cjx_h, cjx_m, target_date=date),
-            "history_30d": _history(db, "to_ternitz", "regional", cjx_h, cjx_m),
-        },
-    }
+    return {"slots": result, "viewed_date": target_date}
 
-    return {
-        "morning": morning,
-        "evening": evening,
-        "viewed_date": date or date_type.today().isoformat(),
-    }
 
+# ---------------------------------------------------------------------------
+# GET /api/commute/trips
+# ---------------------------------------------------------------------------
 
 @router.get("/commute/trips")
 def get_commute_trips(
@@ -268,145 +209,248 @@ def get_commute_trips(
     db: Session = Depends(get_db),
 ):
     """
-    Dynamically return all observed CJX trips for a given date in both directions,
-    each paired with the nearest U6 connection.  Designed for flexible (Gleitzeit)
-    commuters who may take any train, not just fixed departure slots.
+    All CJX trips observed on a given date, in both directions, each
+    paired with the nearest U6 connection at Wien Meidling.
     """
     target_date = date or date_type.today().isoformat()
-    dc = "AND DATE(planned_time AT TIME ZONE 'Europe/Vienna') = :target_date"
 
-    def _all_cjx(direction: str, anchor_station_id: str) -> list:
-        return db.execute(
-            text(f"""
-                SELECT
-                    TO_CHAR(MIN(planned_time) AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
-                    EXTRACT(HOUR   FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
-                    EXTRACT(MINUTE FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_minute
-                FROM train_observations
-                WHERE direction       = :dir
-                  AND line_product    = 'regional'
-                  AND station_id      = :station_id
-                  {dc}
-                GROUP BY
-                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna'),
-                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
-                ORDER BY dep_hour, dep_minute
-            """),
-            {"target_date": target_date, "dir": direction, "station_id": anchor_station_id},
-        ).fetchall()
+    # ── MORNING: CJX to_wien, anchored at Ternitz ────────────────────────
+    morning_rows = db.execute(
+        text("""
+            SELECT
+                tr.api_trip_id,
+                tr.status::text                                                               AS status,
+                TO_CHAR(ts_t.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS dep_time,
+                EXTRACT(HOUR   FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
+                EXTRACT(MINUTE FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
+                ts_t.departure_delay_seconds                                                  AS delay_t,
+                ts_wn.planned_departure                                                       AS dep_wn,
+                ts_wn.departure_delay_seconds                                                 AS delay_wn,
+                ts_b.planned_departure                                                        AS dep_b,
+                ts_b.departure_delay_seconds                                                  AS delay_b,
+                ts_m.planned_arrival                                                          AS arr_m,
+                ts_m.arrival_delay_seconds                                                    AS delay_m
+            FROM trips tr
+            JOIN lines l ON l.id = tr.line_id
+            JOIN trip_stops ts_t ON ts_t.trip_id = tr.id AND ts_t.station_id = :ternitz
+            LEFT JOIN trip_stops ts_wn ON ts_wn.trip_id = tr.id AND ts_wn.station_id = :wn
+            LEFT JOIN trip_stops ts_b  ON ts_b.trip_id  = tr.id AND ts_b.station_id  = :baden
+            LEFT JOIN trip_stops ts_m  ON ts_m.trip_id  = tr.id AND ts_m.station_id  = :meidling
+            WHERE l.code = 'CJX'
+              AND tr.direction::text = 'to_wien'
+              AND tr.service_date    = :target_date
+              AND ts_t.planned_departure IS NOT NULL
+            ORDER BY ts_t.planned_departure
+        """),
+        {
+            "ternitz": TERNITZ_STATION_ID,
+            "wn": WIENER_NEUSTADT_STATION_ID,
+            "baden": BADEN_STATION_ID,
+            "meidling": WIEN_MEIDLING_STATION_ID,
+            "target_date": target_date,
+        },
+    ).fetchall()
 
-    def _nearest_u6(direction: str, station_id: str, min_start: int, min_end: int):
-        return db.execute(
-            text(f"""
+    morning = []
+    for r in morning_rows:
+        cjx_dep_min = r.dep_hour * 60 + r.dep_minute
+        # U6 from Meidling: roughly 40–80 min after CJX departs Ternitz
+        u6 = db.execute(
+            text("""
                 SELECT
-                    TO_CHAR(MIN(planned_time) AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
-                    EXTRACT(HOUR   FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
-                    EXTRACT(MINUTE FROM MIN(planned_time) AT TIME ZONE 'Europe/Vienna')::int AS dep_minute
-                FROM train_observations
-                WHERE direction    = :dir
-                  AND line_product = 'subway'
-                  AND station_id   = :station_id
-                  {dc}
+                    TO_CHAR(ts.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
+                    ts.departure_delay_seconds                                             AS delay,
+                    tr.status::text                                                        AS status
+                FROM trip_stops ts
+                JOIN trips tr ON tr.id = ts.trip_id
+                JOIN lines  l ON l.id  = tr.line_id
+                WHERE l.code = 'U6'
+                  AND tr.direction::text = 'to_wien'
+                  AND tr.service_date    = :target_date
+                  AND ts.station_id      = :meidling
+                  AND ts.planned_departure IS NOT NULL
                   AND (
-                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna') * 60 +
-                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
+                    EXTRACT(HOUR   FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                    + EXTRACT(MINUTE FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna')
                   ) BETWEEN :min_start AND :min_end
-                GROUP BY
-                    EXTRACT(HOUR   FROM planned_time AT TIME ZONE 'Europe/Vienna'),
-                    EXTRACT(MINUTE FROM planned_time AT TIME ZONE 'Europe/Vienna')
-                ORDER BY dep_hour, dep_minute
+                ORDER BY ts.planned_departure
                 LIMIT 1
             """),
             {
-                "target_date": target_date, "dir": direction,
-                "station_id": station_id,
-                "min_start": min_start, "min_end": min_end,
+                "target_date": target_date,
+                "meidling": WIEN_MEIDLING_STATION_ID,
+                "min_start": cjx_dep_min + 40,
+                "min_end": cjx_dep_min + 80,
             },
         ).fetchone()
 
-    # ── MORNING: CJX to_wien (anchor = Ternitz) ──────────────────────────
-    morning = []
-    for row in _all_cjx("to_wien", TERNITZ_STATION_ID):
-        h, m = row.dep_hour, row.dep_minute
-        cjx_dep_min = h * 60 + m
-        # U6 from Meidling: roughly 40–80 min after CJX leaves Ternitz
-        u6_row = _nearest_u6("to_wien", WIEN_MEIDLING_STATION_ID,
-                              cjx_dep_min + 40, cjx_dep_min + 80)
-        # Intermediate station data via trip_id
-        tid = _get_trip_id(db, "to_wien", "regional", TERNITZ_STATION_ID, h, m, target_date)
         trip: dict = {
-            "cjx_dep": row.dep_time,
+            "cjx_dep": r.dep_time,
             "cjx": {
-                "planned_departure": row.dep_time,
+                "planned_departure": r.dep_time,
                 "direction": "to_wien",
                 "from_station": "Ternitz",
                 "to_station": "Wien Meidling",
                 "line": "CJX",
                 "product": "regional",
-                "today": _today_status(db, "to_wien", "regional", h, m, target_date=target_date),
-                "history_30d": _history(db, "to_wien", "regional", h, m),
+                "today": {
+                    "seen_today": True,
+                    "delay_seconds": r.delay_t,
+                    "delay_minutes": round(r.delay_t / 60, 1) if r.delay_t is not None else 0,
+                    "cancelled": r.status == "cancelled",
+                },
             },
-            "wiener_neustadt": _trip_station(db, tid, WIENER_NEUSTADT_STATION_ID, "to_wien"),
-            "baden": _trip_station(db, tid, BADEN_STATION_ID, "to_wien"),
-            "meidling_cjx": _trip_station(db, tid, WIEN_MEIDLING_STATION_ID, "to_wien"),
+            "wiener_neustadt": {
+                "seen": r.dep_wn is not None,
+                "delay_seconds": r.delay_wn,
+                "planned_time_local": r.dep_wn.strftime("%H:%M") if r.dep_wn else None,
+            },
+            "baden": {
+                "seen": r.dep_b is not None,
+                "delay_seconds": r.delay_b,
+            },
+            "meidling_cjx": {
+                "seen": r.arr_m is not None,
+                "delay_seconds": r.delay_m,
+            },
             "u6_dep": None,
             "u6": None,
         }
-        if u6_row:
-            u6h, u6m = u6_row.dep_hour, u6_row.dep_minute
-            trip["u6_dep"] = u6_row.dep_time
+        if u6:
+            trip["u6_dep"] = u6.dep_time
             trip["u6"] = {
-                "planned_departure": u6_row.dep_time,
+                "planned_departure": u6.dep_time,
                 "direction": "to_wien",
                 "from_station": "Wien Meidling",
                 "to_station": "Wien Westbahnhof",
                 "line": "U6",
                 "product": "subway",
-                "today": _today_status(db, "to_wien", "subway", u6h, u6m, target_date=target_date),
-                "history_30d": _history(db, "to_wien", "subway", u6h, u6m),
+                "today": {
+                    "seen_today": True,
+                    "delay_seconds": u6.delay,
+                    "delay_minutes": round(u6.delay / 60, 1) if u6.delay is not None else 0,
+                    "cancelled": u6.status == "cancelled",
+                },
             }
         morning.append(trip)
 
-    # ── EVENING: CJX to_ternitz (anchor = Wien Meidling) ─────────────────
+    # ── EVENING: CJX to_ternitz, anchored at Wien Meidling ───────────────
+    evening_rows = db.execute(
+        text("""
+            SELECT
+                tr.api_trip_id,
+                tr.status::text                                                               AS status,
+                TO_CHAR(ts_m.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS dep_time,
+                EXTRACT(HOUR   FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
+                EXTRACT(MINUTE FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
+                ts_m.departure_delay_seconds                                                  AS delay_m,
+                ts_b.planned_arrival                                                          AS arr_b,
+                ts_b.arrival_delay_seconds                                                    AS delay_b,
+                ts_wn.planned_arrival                                                         AS arr_wn,
+                ts_wn.arrival_delay_seconds                                                   AS delay_wn,
+                ts_t.planned_arrival                                                          AS arr_t,
+                ts_t.arrival_delay_seconds                                                    AS delay_t
+            FROM trips tr
+            JOIN lines l ON l.id = tr.line_id
+            JOIN trip_stops ts_m ON ts_m.trip_id = tr.id AND ts_m.station_id = :meidling
+            LEFT JOIN trip_stops ts_b  ON ts_b.trip_id  = tr.id AND ts_b.station_id  = :baden
+            LEFT JOIN trip_stops ts_wn ON ts_wn.trip_id = tr.id AND ts_wn.station_id = :wn
+            LEFT JOIN trip_stops ts_t  ON ts_t.trip_id  = tr.id AND ts_t.station_id  = :ternitz
+            WHERE l.code = 'CJX'
+              AND tr.direction::text = 'to_ternitz'
+              AND tr.service_date    = :target_date
+              AND ts_m.planned_departure IS NOT NULL
+            ORDER BY ts_m.planned_departure
+        """),
+        {
+            "meidling": WIEN_MEIDLING_STATION_ID,
+            "wn": WIENER_NEUSTADT_STATION_ID,
+            "baden": BADEN_STATION_ID,
+            "ternitz": TERNITZ_STATION_ID,
+            "target_date": target_date,
+        },
+    ).fetchall()
+
     evening = []
-    for row in _all_cjx("to_ternitz", WIEN_MEIDLING_STATION_ID):
-        h, m = row.dep_hour, row.dep_minute
-        cjx_dep_min = h * 60 + m
-        # U6 from Westbahnhof: roughly 5–30 min BEFORE CJX leaves Meidling
-        u6_row = _nearest_u6("to_ternitz", WIEN_WESTBAHNHOF_STATION_ID,
-                              cjx_dep_min - 30, cjx_dep_min - 5)
-        # Intermediate station data via trip_id
-        tid = _get_trip_id(db, "to_ternitz", "regional", WIEN_MEIDLING_STATION_ID, h, m, target_date)
+    for r in evening_rows:
+        cjx_dep_min = r.dep_hour * 60 + r.dep_minute
+        # U6 from Westbahnhof: 5–30 min BEFORE CJX departs Meidling
+        u6 = db.execute(
+            text("""
+                SELECT
+                    TO_CHAR(ts.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI') AS dep_time,
+                    ts.departure_delay_seconds                                             AS delay,
+                    tr.status::text                                                        AS status
+                FROM trip_stops ts
+                JOIN trips tr ON tr.id = ts.trip_id
+                JOIN lines  l ON l.id  = tr.line_id
+                WHERE l.code = 'U6'
+                  AND tr.direction::text = 'to_ternitz'
+                  AND tr.service_date    = :target_date
+                  AND ts.station_id      = :westbahnhof
+                  AND ts.planned_departure IS NOT NULL
+                  AND (
+                    EXTRACT(HOUR   FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna') * 60
+                    + EXTRACT(MINUTE FROM ts.planned_departure AT TIME ZONE 'Europe/Vienna')
+                  ) BETWEEN :min_start AND :min_end
+                ORDER BY ts.planned_departure
+                LIMIT 1
+            """),
+            {
+                "target_date": target_date,
+                "westbahnhof": WIEN_WESTBAHNHOF_STATION_ID,
+                "min_start": cjx_dep_min - 30,
+                "min_end": cjx_dep_min - 5,
+            },
+        ).fetchone()
+
         trip = {
-            "cjx_dep": row.dep_time,
+            "cjx_dep": r.dep_time,
             "cjx": {
-                "planned_departure": row.dep_time,
+                "planned_departure": r.dep_time,
                 "direction": "to_ternitz",
                 "from_station": "Wien Meidling",
                 "to_station": "Ternitz",
                 "line": "CJX",
                 "product": "regional",
-                "today": _today_status(db, "to_ternitz", "regional", h, m, target_date=target_date),
-                "history_30d": _history(db, "to_ternitz", "regional", h, m),
+                "today": {
+                    "seen_today": True,
+                    "delay_seconds": r.delay_m,
+                    "delay_minutes": round(r.delay_m / 60, 1) if r.delay_m is not None else 0,
+                    "cancelled": r.status == "cancelled",
+                },
             },
-            "wiener_neustadt": _trip_station(db, tid, WIENER_NEUSTADT_STATION_ID, "to_ternitz"),
-            "baden": _trip_station(db, tid, BADEN_STATION_ID, "to_ternitz"),
-            "ternitz": _trip_station(db, tid, TERNITZ_STATION_ID, "to_ternitz"),
+            "wiener_neustadt": {
+                "seen": r.arr_wn is not None,
+                "delay_seconds": r.delay_wn,
+                "planned_time_local": r.arr_wn.strftime("%H:%M") if r.arr_wn else None,
+            },
+            "baden": {
+                "seen": r.arr_b is not None,
+                "delay_seconds": r.delay_b,
+            },
+            "ternitz": {
+                "seen": r.arr_t is not None,
+                "delay_seconds": r.delay_t,
+            },
             "u6_dep": None,
             "u6": None,
         }
-        if u6_row:
-            u6h, u6m = u6_row.dep_hour, u6_row.dep_minute
-            trip["u6_dep"] = u6_row.dep_time
+        if u6:
+            trip["u6_dep"] = u6.dep_time
             trip["u6"] = {
-                "planned_departure": u6_row.dep_time,
+                "planned_departure": u6.dep_time,
                 "direction": "to_ternitz",
                 "from_station": "Wien Westbahnhof",
                 "to_station": "Wien Meidling",
                 "line": "U6",
                 "product": "subway",
-                "today": _today_status(db, "to_ternitz", "subway", u6h, u6m, target_date=target_date),
-                "history_30d": _history(db, "to_ternitz", "subway", u6h, u6m),
+                "today": {
+                    "seen_today": True,
+                    "delay_seconds": u6.delay,
+                    "delay_minutes": round(u6.delay / 60, 1) if u6.delay is not None else 0,
+                    "cancelled": u6.status == "cancelled",
+                },
             }
         evening.append(trip)
 
