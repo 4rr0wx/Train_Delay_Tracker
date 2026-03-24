@@ -422,10 +422,15 @@ function renderMorningTrip() {
     document.getElementById("morning-cards").innerHTML =
       `<div class="empty-state">Heute noch keine Morgenfahrten erfasst.</div>`;
     document.getElementById("morning-connection").style.display = "none";
+    document.getElementById("morning-diversion-alert").style.display = "none";
     return;
   }
   const j = trips[morningSelectedIdx] || trips[0];
   document.getElementById("morning-cards").innerHTML = journeyCommuteCard(j, false);
+
+  // Diversion alert for selected trip
+  const divAlert = document.getElementById("morning-diversion-alert");
+  if (divAlert) divAlert.style.display = j.is_diverted ? "" : "none";
 
   const hint = document.getElementById("morning-connection");
   const warn = j.cjx.today.seen_today && !j.cjx.today.cancelled && (j.cjx.today.delay_minutes || 0) > 4;
@@ -442,10 +447,15 @@ function renderEveningTrip() {
     document.getElementById("evening-cards").innerHTML =
       `<div class="empty-state">Heute noch keine Abendfahrten erfasst.</div>`;
     document.getElementById("evening-connection").style.display = "none";
+    document.getElementById("evening-diversion-alert").style.display = "none";
     return;
   }
   const j = trips[eveningSelectedIdx] || trips[0];
   document.getElementById("evening-cards").innerHTML = journeyCommuteCard(j, true);
+
+  // Diversion alert for selected trip
+  const divAlert = document.getElementById("evening-diversion-alert");
+  if (divAlert) divAlert.style.display = j.is_diverted ? "" : "none";
 
   const hint = document.getElementById("evening-connection");
   const warn = j.u6 && j.u6.today.seen_today && !j.u6.today.cancelled && (j.u6.today.delay_minutes || 0) > 10;
@@ -1139,24 +1149,19 @@ function deepMerge(target, source) {
 async function loadConnectionStats() {
   try {
     const data = await fetchJSON("/api/commute/connection-stats?days=30");
-    const bar = document.getElementById("connection-stats-bar");
-    if (!bar) return;
 
-    function _render(pct, elId) {
-      const el = document.getElementById(elId);
-      if (!el) return;
-      if (pct === null || pct === undefined) {
-        el.textContent = "—";
-        el.className = "conn-stat-value";
-        return;
-      }
+    function _render(pct, badgeId, valueId) {
+      const badge = document.getElementById(badgeId);
+      const el    = document.getElementById(valueId);
+      if (!badge || !el) return;
+      if (pct === null || pct === undefined) return;
       el.textContent = `${pct}%`;
-      el.className = `conn-stat-value ${pct >= 85 ? "good" : pct >= 65 ? "warn" : "bad"}`;
+      el.className = `conn-rate-value ${pct >= 85 ? "good" : pct >= 65 ? "warn" : "bad"}`;
+      badge.style.display = "";
     }
 
-    _render(data.morning?.connection_made_pct, "conn-morning-pct");
-    _render(data.evening?.connection_made_pct, "conn-evening-pct");
-    bar.style.display = "flex";
+    _render(data.morning?.connection_made_pct, "conn-rate-morning", "conn-morning-pct");
+    _render(data.evening?.connection_made_pct, "conn-rate-evening", "conn-evening-pct");
   } catch (_) {}
 }
 

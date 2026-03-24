@@ -128,29 +128,19 @@
       <span>Für diesen Tag sind keine Fahrtdaten vorhanden (z.B. Wochenende oder kein Betrieb).</span>
     </div>
 
-    <div id="diversion-alert" class="alert-banner" style="display:none">
-      <span class="alert-icon">&#9888;</span>
-      <span id="diversion-alert-text">Heute Umleitung erkannt – kein Halt in Baden!</span>
-    </div>
-
-    <div id="connection-stats-bar" class="connection-stats-bar" style="display:none">
-      <span class="conn-stat-item">
-        <span class="conn-stat-label">Anschluss Morgen (30T)</span>
-        <span class="conn-stat-value" id="conn-morning-pct">—</span>
-      </span>
-      <span class="conn-stat-sep">·</span>
-      <span class="conn-stat-item">
-        <span class="conn-stat-label">Anschluss Abend (30T)</span>
-        <span class="conn-stat-value" id="conn-evening-pct">—</span>
-      </span>
-    </div>
-
-    <section class="commute-section">
+<section class="commute-section">
       <div class="section-header">
         <span class="section-badge cjx-badge">CJX</span>
         <span class="section-badge u6-badge">U6</span>
         <h3>Morgen &rarr; Wien</h3>
         <span class="section-sub">Ternitz → Baden → Meidling → Westbahnhof</span>
+        <span class="conn-rate-badge" id="conn-rate-morning" style="display:none">
+          <span class="conn-rate-label">Anschluss</span>
+          <span class="conn-rate-value" id="conn-morning-pct">—</span>
+        </span>
+      </div>
+      <div id="morning-diversion-alert" class="section-alert" style="display:none">
+        <span>&#9888;</span> Umleitung erkannt &ndash; kein Halt in Baden!
       </div>
       <div class="trip-selector-row" id="morning-selector-row" style="display:none">
         <label class="trip-selector-label" for="morning-trip-select">Verbindung:</label>
@@ -166,6 +156,13 @@
         <span class="section-badge cjx-badge">CJX</span>
         <h3>Abend &rarr; Ternitz</h3>
         <span class="section-sub">Westbahnhof → Meidling → Baden → Ternitz</span>
+        <span class="conn-rate-badge" id="conn-rate-evening" style="display:none">
+          <span class="conn-rate-label">Anschluss</span>
+          <span class="conn-rate-value" id="conn-evening-pct">—</span>
+        </span>
+      </div>
+      <div id="evening-diversion-alert" class="section-alert" style="display:none">
+        <span>&#9888;</span> Umleitung erkannt &ndash; kein Halt in Baden!
       </div>
       <div class="trip-selector-row" id="evening-selector-row" style="display:none">
         <label class="trip-selector-label" for="evening-trip-select">Verbindung:</label>
