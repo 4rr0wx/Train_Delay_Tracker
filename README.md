@@ -25,12 +25,13 @@ Das Projekt folgt einer **Client-Server-Architektur** mit Docker-Containerisieru
 - **FastAPI-Webserver** mit REST-API-Endpoints
 - **APScheduler** für periodische Datenerfassung (alle 5 Minuten)
 - **SQLAlchemy ORM** für Datenbankoperationen
+- **Alembic** für Datenbankmigrationen (Schema-Versionierung)
 - **HTTPX-HTTP-Client** für API-Kommunikation mit ÖBB
 
 ### Persistierung
 - **PostgreSQL 16** für relationale Datenbank
-- Strukturierte Tabellen für Stationen und Zugbeobachtungen
-- Automatisches Upsert von Beobachtungen
+- **V2-Datenmodell**: normalisiertes Schema mit `trips`, `trip_stops`, `service_days`, `lines`, `routes`, `connections`, `commute_slots`, `remarks`, `collection_runs` und `api_errors`
+- Automatisches Upsert von Beobachtungen mit vollständigem CollectionRun-Tracking
 
 ### Frontend
 - Statische HTML/CSS/JavaScript-Anwendung
@@ -46,6 +47,8 @@ Das Projekt folgt einer **Client-Server-Architektur** mit Docker-Containerisieru
 | Datenbankdriver | psycopg2-binary 2.9.9 |
 | HTTP-Client | httpx 0.27.0 |
 | Task-Scheduler | APScheduler 3.10.4 |
+| DB-Migrationen | Alembic 1.13.3 |
+| Feiertagskalender | holidays ≥ 0.46 |
 | Containerisierung | Docker & Docker Compose |
 | Datenbank | PostgreSQL 16 |
 
@@ -130,37 +133,88 @@ Das Projekt folgt einer **Client-Server-Architektur** mit Docker-Containerisieru
    GRANT ALL PRIVILEGES ON DATABASE train_tracker TO tracker;
    ```
 
-5. **Anwendung starten:**
+5. **Datenbankschema migrieren:**
+   ```bash
+   alembic upgrade head
+   ```
+
+6. **Anwendung starten:**
    ```bash
    python main.py
    ```
 
-## 🗄️ Datenbankschema
+## 🗄️ Datenbankschema (V2)
+
+Das V2-Schema ersetzt die frühere `train_observations`-Tabelle durch ein normalisiertes Datenmodell:
 
 ### Tabelle: `stations`
 | Spalte | Typ | Beschreibung |
 |--------|-----|-------------|
 | `id` | VARCHAR(20) | Eindeutige Stations-ID (ÖBB) |
 | `name` | VARCHAR(200) | Stationsname |
+| `short_name` | VARCHAR(50) | Kurzname |
+| `station_type` | VARCHAR(30) | Typ (train, subway, tram, …) |
+| `latitude` | NUMERIC(9,6) | Breitengrad |
+| `longitude` | NUMERIC(9,6) | Längengrad |
 
-### Tabelle: `train_observations`
+### Tabelle: `lines`
 | Spalte | Typ | Beschreibung |
 |--------|-----|-------------|
-| `id` | INTEGER | Eindeutige Observations-ID |
-| `trip_id` | VARCHAR(255) | Zugnummer |
-| `station_id` | VARCHAR(20) | Stations-ID |
-| `direction` | VARCHAR(10) | Fahrtrichtung (to_wien/to_ternitz) |
-| `line_name` | VARCHAR(100) | Name der Zuglinie |
-| `line_product` | VARCHAR(50) | Zugtyp (regional, subway, etc.) |
-| `destination` | VARCHAR(200) | Zielstation |
-| `planned_time` | TIMESTAMP | Geplante Ankunfts-/Abfahrtszeit |
-| `actual_time` | TIMESTAMP | Tatsächliche Ankunfts-/Abfahrtszeit |
-| `delay_seconds` | INTEGER | Verspätung in Sekunden |
-| `cancelled` | BOOLEAN | Wurde die Fahrt storniert |
+| `id` | INTEGER | Primärschlüssel |
+| `code` | VARCHAR(20) | Liniencode (z.B. CJX, U6) |
+| `display_name` | VARCHAR(100) | Anzeigename |
+| `operator` | VARCHAR(100) | Betreiber |
+| `product_type` | VARCHAR(30) | Typ (regional, subway, …) |
+
+### Tabelle: `service_days`
+| Spalte | Typ | Beschreibung |
+|--------|-----|-------------|
+| `service_date` | DATE | Betriebsdatum (Primärschlüssel) |
+| `is_weekday` | BOOLEAN | Werktag ja/nein |
+| `day_of_week` | SMALLINT | Wochentag (0=Mo … 6=So) |
+| `is_austrian_holiday` | BOOLEAN | Österreichischer Feiertag |
+| `holiday_name` | VARCHAR(200) | Name des Feiertags |
+
+### Tabelle: `trips`
+| Spalte | Typ | Beschreibung |
+|--------|-----|-------------|
+| `id` | BIGINT | Primärschlüssel |
+| `api_trip_id` | VARCHAR(255) | Zugnummer aus der API |
+| `service_date` | DATE | Betriebsdatum (→ service_days) |
+| `line_id` | INTEGER | Linie (→ lines) |
+| `direction` | ENUM | Fahrtrichtung (to_wien/to_ternitz) |
+| `train_number` | VARCHAR(50) | Zugnummer |
+| `destination_name` | VARCHAR(200) | Zielstation |
+| `status` | ENUM | Status (scheduled/delayed/cancelled/…) |
+| `is_diverted` | BOOLEAN | Umgeleitet ja/nein |
+
+### Tabelle: `trip_stops`
+| Spalte | Typ | Beschreibung |
+|--------|-----|-------------|
+| `id` | BIGINT | Primärschlüssel |
+| `trip_id` | BIGINT | Fahrt (→ trips) |
+| `station_id` | VARCHAR(20) | Station (→ stations) |
+| `stop_sequence` | INTEGER | Reihenfolge im Linienverlauf |
+| `planned_arrival` | TIMESTAMPTZ | Geplante Ankunft |
+| `planned_departure` | TIMESTAMPTZ | Geplante Abfahrt |
+| `actual_arrival` | TIMESTAMPTZ | Tatsächliche Ankunft |
+| `actual_departure` | TIMESTAMPTZ | Tatsächliche Abfahrt |
+| `arrival_delay_seconds` | INTEGER | Ankunftsverspätung in Sekunden |
+| `departure_delay_seconds` | INTEGER | Abfahrtsverspätung in Sekunden |
+| `cancelled_at_stop` | BOOLEAN | Halt storniert |
 | `platform` | VARCHAR(20) | Bahnsteig |
-| `remarks` | JSON | Zusätzliche Hinweise/Anmerkungen |
-| `first_seen_at` | TIMESTAMP | Zeitstempel der Erstsichtung |
-| `last_updated_at` | TIMESTAMP | Zeitstempel der letzten Aktualisierung |
+| `platform_changed` | BOOLEAN | Bahnsteigänderung |
+
+### Weitere Tabellen
+| Tabelle | Beschreibung |
+|---------|-------------|
+| `routes` | Definierte Linienwege mit Richtung |
+| `route_legs` | Einzelne Halte eines Linienwegs |
+| `commute_slots` | Konfigurierte Pendel-Zeitfenster |
+| `connections` | Umsteigeverbindungen zwischen Fahrten |
+| `remarks` | Hinweise/Warnungen zu Fahrten oder Halten |
+| `collection_runs` | Protokoll jedes Datenerfassungslaufs |
+| `api_errors` | Protokoll fehlgeschlagener API-Abfragen |
 
 ## 🔄 Datenerfassungsprozess
 
@@ -168,6 +222,7 @@ Die Anwendung erfasst automatisch Zugdaten über folgende Schritte:
 
 1. **Periodischer Abruf** (alle 5 Minuten)
    - APScheduler triggert `collect_data()`
+   - Ein `CollectionRun`-Eintrag wird angelegt und am Ende aktualisiert
 
 2. **API-Abfragen** an ÖBB-API (`https://oebb.macistry.com/api`)
    - Abfahrten von Ternitz (CJX Wien-gebunden)
@@ -177,12 +232,13 @@ Die Anwendung erfasst automatisch Zugdaten über folgende Schritte:
 
 3. **Filterung & Normalisierung**
    - Nur relevante Züge (CJX, U6) werden behalten
-   - Fahrtrichtung wird ermittelt
-   - Daten werden in ein standardisiertes Format parsiert
+   - Fahrtrichtung wird ermittelt und in `trips.direction` gespeichert
+   - Service Day (04:00-Uhr-Grenze, Europe/Vienna) wird berechnet
+   - Daten werden in `trips` und `trip_stops` geschrieben
 
 4. **Datenbank-Upsert**
-   - Neue Beobachtungen werden eingefügt
-   - Bestehende Einträge (nach trip_id + planned_time) werden aktualisiert
+   - Trips: Upsert nach `(api_trip_id, service_date)`
+   - TripStops: Upsert nach `(trip_id, station_id)`
    - Timestamps werden bei Änderungen aktualisiert
 
 ## 📈 Beispiele für API-Nutzung
@@ -271,11 +327,12 @@ Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe `LICENSE`-Datei für 
 
 - [FastAPI-Dokumentation](https://fastapi.tiangolo.com/)
 - [SQLAlchemy ORM-Dokumentation](https://docs.sqlalchemy.org/)
+- [Alembic-Dokumentation](https://alembic.sqlalchemy.org/)
 - [ÖBB Hafas-API](https://oebb.macistry.com/)
 - [Docker-Dokumentation](https://docs.docker.com/)
 - [PostgreSQL-Dokumentation](https://www.postgresql.org/docs/)
 
 ---
 
-**Last Updated**: 2025-02-15
-**Version**: 1.0.0
+**Last Updated**: 2026-03-24
+**Version**: 2.0.0
