@@ -259,6 +259,7 @@ def get_commute_trips(
             SELECT
                 tr.api_trip_id,
                 tr.status::text                                                               AS status,
+                tr.is_diverted,
                 TO_CHAR(ts_t.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS dep_time,
                 EXTRACT(HOUR   FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
                 EXTRACT(MINUTE FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
@@ -326,6 +327,7 @@ def get_commute_trips(
 
         trip: dict = {
             "cjx_dep": r.dep_time,
+            "is_diverted": bool(r.is_diverted),
             "cjx": {
                 "planned_departure": r.dep_time,
                 "direction": "to_wien",
@@ -391,6 +393,7 @@ def get_commute_trips(
             SELECT
                 tr.api_trip_id,
                 tr.status::text                                                               AS status,
+                tr.is_diverted,
                 TO_CHAR(ts_m.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS dep_time,
                 EXTRACT(HOUR   FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
                 EXTRACT(MINUTE FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
@@ -458,6 +461,7 @@ def get_commute_trips(
 
         trip = {
             "cjx_dep": r.dep_time,
+            "is_diverted": bool(r.is_diverted),
             "cjx": {
                 "planned_departure": r.dep_time,
                 "direction": "to_ternitz",
