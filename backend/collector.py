@@ -240,6 +240,7 @@ class _Collector:
         self.db = db
         self.run = run
         self._ensured_dates: set[date] = set()
+        self._station_errors: set[str] = set()  # station IDs with API errors this cycle
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -267,6 +268,7 @@ class _Collector:
             response_body=error_info.get("response_body"),
         ))
         self.run.api_calls_failed += 1
+        self._station_errors.add(station_id)
 
     def _upsert_trip(
         self,
@@ -276,7 +278,12 @@ class _Collector:
         direction: TripDirection,
         item: dict,
     ) -> Trip:
-        """Insert-or-update a Trip; increments run counters."""
+        """Insert-or-update a Trip; increments run counters.
+
+        HAFAS can return different tripId values for the same physical train when
+        queried from different stations.  We therefore fall back to matching on
+        (train_number, service_date, direction, line_id) before creating a new row.
+        """
         trip = (
             self.db.query(Trip)
             .filter_by(api_trip_id=api_trip_id, service_date=service_date)
@@ -286,6 +293,24 @@ class _Collector:
         line_obj = item.get("line") or {}
         dest = item.get("direction") or (item.get("destination") or {}).get("name")
         prov = item.get("provenance")
+        train_number = line_obj.get("fahrtNr")
+
+        if trip is None and train_number:
+            # Fallback: find an existing trip for the same train run
+            trip = (
+                self.db.query(Trip)
+                .filter_by(
+                    train_number=train_number,
+                    service_date=service_date,
+                    direction=direction,
+                    line_id=line.id,
+                )
+                .first()
+            )
+            if trip:
+                trip.status = new_status
+                self.run.trips_updated += 1
+                return trip
 
         if trip is None:
             trip = Trip(
@@ -293,7 +318,7 @@ class _Collector:
                 service_date=service_date,
                 line_id=line.id,
                 direction=direction,
-                train_number=line_obj.get("fahrtNr"),
+                train_number=train_number,
                 destination_name=dest,
                 origin_name=prov,
                 status=new_status,
@@ -438,7 +463,19 @@ class _Collector:
         self._process([i for i in items if filter_fn(i)], station_id, endpoint, direction, line)
 
     def _detect_diversions(self, cjx_line: Line) -> None:
-        """Mark CJX trips as diverted when they have Ternitz + Meidling stops but no Baden stop."""
+        """Mark CJX trips as diverted when they have Ternitz + Meidling stops but no Baden stop.
+
+        Skipped entirely when Baden data could not be collected this cycle — otherwise
+        every completed trip would be falsely flagged as diverted.
+        Also explicitly resets is_diverted to False when the Baden stop IS present.
+        """
+        if BADEN_STATION_ID in self._station_errors:
+            logger.warning(
+                "Skipping diversion detection: Baden (%s) had API errors this cycle",
+                BADEN_STATION_ID,
+            )
+            return
+
         for svc_date in self._ensured_dates:
             trips = (
                 self.db.query(Trip)
@@ -452,12 +489,14 @@ class _Collector:
                     .filter_by(trip_id=trip.id)
                     .all()
                 }
-                if (
-                    TERNITZ_STATION_ID in stop_ids
-                    and WIEN_MEIDLING_STATION_ID in stop_ids
-                    and BADEN_STATION_ID not in stop_ids
-                ):
+                has_ternitz  = TERNITZ_STATION_ID in stop_ids
+                has_meidling = WIEN_MEIDLING_STATION_ID in stop_ids
+                has_baden    = BADEN_STATION_ID in stop_ids
+
+                if has_ternitz and has_meidling and not has_baden:
                     trip.is_diverted = True
+                elif has_ternitz and has_meidling and has_baden:
+                    trip.is_diverted = False
 
     # ------------------------------------------------------------------
     # Main collection

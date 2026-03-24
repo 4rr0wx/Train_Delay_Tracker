@@ -230,6 +230,18 @@ def get_commute_overview(
 # GET /api/commute/trips
 # ---------------------------------------------------------------------------
 
+def _fallback_planned(anchor_utc, offset_min: int) -> str | None:
+    """Calculate a schedule-based planned time string (HH:MM, Vienna time) from an
+    anchor UTC datetime and a typical travel offset in minutes."""
+    if anchor_utc is None:
+        return None
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    return (anchor_utc + timedelta(minutes=offset_min)).astimezone(
+        ZoneInfo("Europe/Vienna")
+    ).strftime("%H:%M")
+
+
 @router.get("/commute/trips")
 def get_commute_trips(
     date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
@@ -251,11 +263,12 @@ def get_commute_trips(
                 EXTRACT(HOUR   FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
                 EXTRACT(MINUTE FROM ts_t.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
                 ts_t.departure_delay_seconds                                                  AS delay_t,
-                ts_wn.planned_departure                                                       AS dep_wn,
+                ts_t.planned_departure                                                        AS dep_t_utc,
+                TO_CHAR(ts_wn.planned_departure AT TIME ZONE 'Europe/Vienna', 'HH24:MI')     AS wn_planned_local,
                 ts_wn.departure_delay_seconds                                                 AS delay_wn,
-                ts_b.planned_departure                                                        AS dep_b,
+                TO_CHAR(ts_b.planned_departure  AT TIME ZONE 'Europe/Vienna', 'HH24:MI')     AS b_planned_local,
                 ts_b.departure_delay_seconds                                                  AS delay_b,
-                ts_m.planned_arrival                                                          AS arr_m,
+                TO_CHAR(ts_m.planned_arrival    AT TIME ZONE 'Europe/Vienna', 'HH24:MI')     AS m_planned_local,
                 ts_m.arrival_delay_seconds                                                    AS delay_m
             FROM trips tr
             JOIN lines l ON l.id = tr.line_id
@@ -333,17 +346,19 @@ def get_commute_trips(
                 "remarks": _trip_remarks(db, r.api_trip_id, target_date),
             },
             "wiener_neustadt": {
-                "seen": r.dep_wn is not None,
+                "seen": r.wn_planned_local is not None,
                 "delay_seconds": r.delay_wn,
-                "planned_time_local": r.dep_wn.strftime("%H:%M") if r.dep_wn else None,
+                "planned_time_local": r.wn_planned_local or _fallback_planned(r.dep_t_utc, 15),
             },
             "baden": {
-                "seen": r.dep_b is not None,
+                "seen": r.b_planned_local is not None,
                 "delay_seconds": r.delay_b,
+                "planned_time_local": r.b_planned_local or _fallback_planned(r.dep_t_utc, 40),
             },
             "meidling_cjx": {
-                "seen": r.arr_m is not None,
+                "seen": r.m_planned_local is not None,
                 "delay_seconds": r.delay_m,
+                "planned_time_local": r.m_planned_local or _fallback_planned(r.dep_t_utc, 70),
             },
             "u6_dep": None,
             "u6": None,
@@ -380,11 +395,12 @@ def get_commute_trips(
                 EXTRACT(HOUR   FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_hour,
                 EXTRACT(MINUTE FROM ts_m.planned_departure AT TIME ZONE 'Europe/Vienna')::int AS dep_minute,
                 ts_m.departure_delay_seconds                                                  AS delay_m,
-                ts_b.planned_arrival                                                          AS arr_b,
+                ts_m.planned_departure                                                        AS dep_m_utc,
+                TO_CHAR(ts_b.planned_arrival   AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS b_planned_local,
                 ts_b.arrival_delay_seconds                                                    AS delay_b,
-                ts_wn.planned_arrival                                                         AS arr_wn,
+                TO_CHAR(ts_wn.planned_arrival  AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS wn_planned_local,
                 ts_wn.arrival_delay_seconds                                                   AS delay_wn,
-                ts_t.planned_arrival                                                          AS arr_t,
+                TO_CHAR(ts_t.planned_arrival   AT TIME ZONE 'Europe/Vienna', 'HH24:MI')      AS t_planned_local,
                 ts_t.arrival_delay_seconds                                                    AS delay_t
             FROM trips tr
             JOIN lines l ON l.id = tr.line_id
@@ -462,17 +478,19 @@ def get_commute_trips(
                 "remarks": _trip_remarks(db, r.api_trip_id, target_date),
             },
             "wiener_neustadt": {
-                "seen": r.arr_wn is not None,
+                "seen": r.wn_planned_local is not None,
                 "delay_seconds": r.delay_wn,
-                "planned_time_local": r.arr_wn.strftime("%H:%M") if r.arr_wn else None,
+                "planned_time_local": r.wn_planned_local or _fallback_planned(r.dep_m_utc, 55),
             },
             "baden": {
-                "seen": r.arr_b is not None,
+                "seen": r.b_planned_local is not None,
                 "delay_seconds": r.delay_b,
+                "planned_time_local": r.b_planned_local or _fallback_planned(r.dep_m_utc, 30),
             },
             "ternitz": {
-                "seen": r.arr_t is not None,
+                "seen": r.t_planned_local is not None,
                 "delay_seconds": r.delay_t,
+                "planned_time_local": r.t_planned_local or _fallback_planned(r.dep_m_utc, 70),
             },
             "u6_dep": None,
             "u6": None,
