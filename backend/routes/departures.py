@@ -94,7 +94,7 @@ def get_departures(
             "planned_time": r.planned_time.isoformat() if r.planned_time else None,
             "actual_time": r.actual_time.isoformat() if r.actual_time else None,
             "delay_seconds": r.delay_seconds,
-            "delay_minutes": round(r.delay_seconds / 60, 1) if r.delay_seconds else 0,
+            "delay_minutes": round(r.delay_seconds / 60, 1) if r.delay_seconds is not None else None,
             "cancelled": r.cancelled,
             "platform": r.platform,
             "station_id": r.station_id,
