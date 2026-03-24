@@ -124,4 +124,8 @@ def get_line_by_code(db: Session, code: str) -> Line:
             raise ValueError(f"Line with code {code!r} not found in database")
         _line_id_cache[code] = line.id
 
-    return db.get(Line, _line_id_cache[code])
+    line = db.get(Line, _line_id_cache[code])
+    if line is None:
+        del _line_id_cache[code]
+        raise ValueError(f"Line with code {code!r} not found in database (stale cache)")
+    return line
