@@ -163,6 +163,28 @@ def _trip_status(item: dict) -> TripStatus:
     return TripStatus.scheduled
 
 
+def _parse_stopover(sv: dict) -> dict:
+    """Normalize a HAFAS stopover dict into the shape expected by _upsert_trip_stop().
+
+    HAFAS stopover fields:
+      stop.id, plannedDeparture, departure, departureDelay,
+      plannedArrival, arrival, arrivalDelay, cancelled,
+      platform, plannedPlatform, remarks
+    """
+    return {
+        "_planned_departure": sv.get("plannedDeparture"),
+        "_actual_departure":  sv.get("departure"),
+        "_departure_delay":   sv.get("departureDelay"),
+        "_planned_arrival":   sv.get("plannedArrival"),
+        "_actual_arrival":    sv.get("arrival"),
+        "_arrival_delay":     sv.get("arrivalDelay"),
+        "cancelled":          sv.get("cancelled", False),
+        "platform":           sv.get("platform"),
+        "plannedPlatform":    sv.get("plannedPlatform"),
+        "remarks":            sv.get("remarks") or [],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Low-level HTTP fetch (returns data + optional error dict)
 # ---------------------------------------------------------------------------
@@ -226,6 +248,51 @@ def _fetch(
             "error_message": str(exc),
             "is_hafas_error": False,
             "response_body": None,
+        }
+
+
+def _fetch_trip(trip_id: str) -> tuple[dict | None, dict | None]:
+    """Fetch the full journey for a trip from GET /trips/{trip_id}.
+
+    Returns:
+        ``(trip_data, None)`` on success, ``(None, error_info_dict)`` on failure.
+
+    Note: errors are NOT logged to the api_errors table because its endpoint
+    CHECK constraint only allows 'departures' and 'arrivals'.  Callers should
+    log via logger.warning() and increment run.api_calls_failed instead.
+    """
+    url = f"{API_BASE_URL}/trips/{trip_id}"
+    try:
+        with httpx.Client(timeout=TIMEOUT) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+
+        if isinstance(data, dict) and data.get("isHafasError"):
+            return None, {
+                "url": url,
+                "http_status_code": None,
+                "error_type": "hafas_error",
+                "error_message": data.get("message", "HAFAS error"),
+            }
+
+        # The endpoint may return the trip directly or wrapped under a "trip" key.
+        trip_data = data.get("trip", data) if isinstance(data, dict) else None
+        return trip_data, None
+
+    except httpx.HTTPStatusError as exc:
+        return None, {
+            "url": url,
+            "http_status_code": exc.response.status_code,
+            "error_type": "http_status_error",
+            "error_message": str(exc),
+        }
+    except Exception as exc:
+        return None, {
+            "url": url,
+            "http_status_code": None,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
         }
 
 
@@ -386,6 +453,16 @@ class _Collector:
             ts.planned_departure = _parse_dt(planned_when)
             ts.actual_departure = _parse_dt(actual_when)
             ts.departure_delay_seconds = delay
+        elif endpoint == "trip_refresh":
+            # Stopover data includes both arrival and departure in one shot.
+            if item.get("_planned_departure"):
+                ts.planned_departure       = _parse_dt(item["_planned_departure"])
+                ts.actual_departure        = _parse_dt(item.get("_actual_departure"))
+                ts.departure_delay_seconds = item.get("_departure_delay")
+            if item.get("_planned_arrival"):
+                ts.planned_arrival         = _parse_dt(item["_planned_arrival"])
+                ts.actual_arrival          = _parse_dt(item.get("_actual_arrival"))
+                ts.arrival_delay_seconds   = item.get("_arrival_delay")
         else:  # arrivals
             ts.planned_arrival = _parse_dt(planned_when)
             ts.actual_arrival = _parse_dt(actual_when)
@@ -461,6 +538,66 @@ class _Collector:
             self._log_api_error(station_id, error_info)
             return
         self._process([i for i in items if filter_fn(i)], station_id, endpoint, direction, line)
+
+    # ------------------------------------------------------------------
+    # Trip-level journey refresh (mid-journey delay propagation)
+    # ------------------------------------------------------------------
+
+    _CJX_STATION_IDS: frozenset[str] = frozenset({
+        TERNITZ_STATION_ID,
+        WIENER_NEUSTADT_STATION_ID,
+        BADEN_STATION_ID,
+        WIEN_MEIDLING_STATION_ID,
+    })
+
+    def _collect_active_cjx_trips(self, cjx_line: Line) -> list[Trip]:
+        """Return CJX trips from today's service dates that are not yet cancelled/completed."""
+        if not self._ensured_dates:
+            return []
+        return (
+            self.db.query(Trip)
+            .filter(
+                Trip.line_id == cjx_line.id,
+                Trip.service_date.in_(self._ensured_dates),
+                Trip.status.not_in([TripStatus.cancelled, TripStatus.completed]),
+            )
+            .all()
+        )
+
+    def _refresh_trip_journey(self, trip: Trip, cjx_line: Line) -> None:
+        """Fetch the full journey for one trip and update all known-station stops."""
+        trip_data, error = _fetch_trip(trip.api_trip_id)
+        self.run.api_calls_made += 1
+        if error:
+            logger.warning(
+                "Trip refresh failed for %s: %s",
+                trip.api_trip_id, error.get("error_message"),
+            )
+            self.run.api_calls_failed += 1
+            return
+
+        stopovers = (trip_data or {}).get("stopovers") or []
+        if not stopovers:
+            logger.debug("No stopovers returned for trip %s", trip.api_trip_id)
+            return
+
+        for sv in stopovers:
+            stop_id = (sv.get("stop") or {}).get("id")
+            if not stop_id or stop_id not in self._CJX_STATION_IDS:
+                continue
+            item = _parse_stopover(sv)
+            ts = self._upsert_trip_stop(trip, cjx_line.code, stop_id, "trip_refresh", item)
+            self._upsert_remarks(ts, item["remarks"])
+
+    def _refresh_active_trips(self, cjx_line: Line) -> None:
+        """Run trip-journey refresh for every active CJX trip seen this cycle."""
+        trips = self._collect_active_cjx_trips(cjx_line)
+        if not trips:
+            logger.debug("No active CJX trips to refresh")
+            return
+        logger.info("Refreshing %d active CJX trip(s) via /trips endpoint", len(trips))
+        for trip in trips:
+            self._refresh_trip_journey(trip, cjx_line)
 
     def _detect_diversions(self, cjx_line: Line) -> None:
         """Mark CJX trips as diverted when they have Ternitz + Meidling stops but no Baden stop.
@@ -552,6 +689,9 @@ class _Collector:
                    lambda i: _is_u6(i) and _U6_TO_TERNITZ in _dir_str(i))
         self._call(WIEN_WESTBAHNHOF_STATION_ID, "arrivals", TripDirection.to_wien, u6,
                    lambda i: _is_u6(i))
+
+        # ── Trip-level refresh: propagate mid-journey delays ──────────
+        self._refresh_active_trips(cjx)
 
         self._detect_diversions(cjx)
 
