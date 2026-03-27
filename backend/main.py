@@ -8,6 +8,7 @@ from scheduler import scheduler
 from collector import collect_data
 from database import SessionLocal
 from seed import seed_reference_data
+from station_health import check_and_update_station_ids
 from routes import health, stats, departures, commute, journeys
 
 logging.basicConfig(
@@ -23,11 +24,15 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         seed_reference_data(db)
 
-    # 2. Start the background scheduler
+    # 2. Validate station IDs before starting the scheduler/collector
+    with SessionLocal() as db:
+        check_and_update_station_ids(db)
+
+    # 3. Start the background scheduler
     logger.info("Starting scheduler...")
     scheduler.start()
 
-    # 3. Run an initial data collection on startup
+    # 4. Run an initial data collection on startup
     try:
         collect_data()
     except Exception as e:

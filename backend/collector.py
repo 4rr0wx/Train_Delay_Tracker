@@ -117,28 +117,36 @@ def _cjx_arrival_is_wien_bound(item: dict) -> bool:
 # Known stop_sequence per line code + direction
 # ---------------------------------------------------------------------------
 
-_STOP_SEQUENCE: dict[tuple[str, TripDirection], dict[str, int]] = {
-    (RELEVANT_TRAIN_LINE, TripDirection.to_wien): {
-        TERNITZ_STATION_ID: 1,
-        WIENER_NEUSTADT_STATION_ID: 2,
-        BADEN_STATION_ID: 3,
-        WIEN_MEIDLING_STATION_ID: 4,
-    },
-    (RELEVANT_TRAIN_LINE, TripDirection.to_ternitz): {
-        WIEN_MEIDLING_STATION_ID: 1,
-        BADEN_STATION_ID: 2,
-        WIENER_NEUSTADT_STATION_ID: 3,
-        TERNITZ_STATION_ID: 4,
-    },
-    (RELEVANT_SUBWAY_LINE, TripDirection.to_wien): {
-        WIEN_MEIDLING_STATION_ID: 1,
-        WIEN_WESTBAHNHOF_STATION_ID: 2,
-    },
-    (RELEVANT_SUBWAY_LINE, TripDirection.to_ternitz): {
-        WIEN_WESTBAHNHOF_STATION_ID: 1,
-        WIEN_MEIDLING_STATION_ID: 2,
-    },
-}
+def _build_stop_sequence() -> dict[tuple[str, TripDirection], dict[str, int]]:
+    """Build the stop-sequence lookup from the current runtime config values.
+
+    Called once at module load and again by station_health whenever IDs change.
+    """
+    import config as _cfg
+    return {
+        (RELEVANT_TRAIN_LINE, TripDirection.to_wien): {
+            _cfg.TERNITZ_STATION_ID: 1,
+            _cfg.WIENER_NEUSTADT_STATION_ID: 2,
+            _cfg.BADEN_STATION_ID: 3,
+            _cfg.WIEN_MEIDLING_STATION_ID: 4,
+        },
+        (RELEVANT_TRAIN_LINE, TripDirection.to_ternitz): {
+            _cfg.WIEN_MEIDLING_STATION_ID: 1,
+            _cfg.BADEN_STATION_ID: 2,
+            _cfg.WIENER_NEUSTADT_STATION_ID: 3,
+            _cfg.TERNITZ_STATION_ID: 4,
+        },
+        (RELEVANT_SUBWAY_LINE, TripDirection.to_wien): {
+            _cfg.WIEN_MEIDLING_STATION_ID: 1,
+            _cfg.WIEN_WESTBAHNHOF_STATION_ID: 2,
+        },
+        (RELEVANT_SUBWAY_LINE, TripDirection.to_ternitz): {
+            _cfg.WIEN_WESTBAHNHOF_STATION_ID: 1,
+            _cfg.WIEN_MEIDLING_STATION_ID: 2,
+        },
+    }
+
+_STOP_SEQUENCE = _build_stop_sequence()
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +316,13 @@ class _Collector:
         self.run = run
         self._ensured_dates: set[date] = set()
         self._station_errors: set[str] = set()  # station IDs with API errors this cycle
+        import config as _cfg
+        self._cjx_station_ids: frozenset[str] = frozenset({
+            _cfg.TERNITZ_STATION_ID,
+            _cfg.WIENER_NEUSTADT_STATION_ID,
+            _cfg.BADEN_STATION_ID,
+            _cfg.WIEN_MEIDLING_STATION_ID,
+        })
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -546,13 +561,6 @@ class _Collector:
     # Trip-level journey refresh (mid-journey delay propagation)
     # ------------------------------------------------------------------
 
-    _CJX_STATION_IDS: frozenset[str] = frozenset({
-        TERNITZ_STATION_ID,
-        WIENER_NEUSTADT_STATION_ID,
-        BADEN_STATION_ID,
-        WIEN_MEIDLING_STATION_ID,
-    })
-
     def _collect_active_cjx_trips(self, cjx_line: Line) -> list[Trip]:
         """Return CJX trips from today's service dates that are not yet cancelled/completed."""
         if not self._ensured_dates:
@@ -586,7 +594,7 @@ class _Collector:
 
         for sv in stopovers:
             stop_id = (sv.get("stop") or {}).get("id")
-            if not stop_id or stop_id not in self._CJX_STATION_IDS:
+            if not stop_id or stop_id not in self._cjx_station_ids:
                 continue
             item = _parse_stopover(sv)
             ts = self._upsert_trip_stop(trip, cjx_line.code, stop_id, "trip_refresh", item)
