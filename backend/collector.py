@@ -375,6 +375,9 @@ class _Collector:
                 .first()
             )
             if trip:
+                # Update api_trip_id so future lookups by tripId also match
+                if trip.api_trip_id != api_trip_id:
+                    trip.api_trip_id = api_trip_id
                 trip.status = new_status
                 self.run.trips_updated += 1
                 return trip
@@ -705,7 +708,8 @@ def collect_data() -> None:
     started_at = datetime.now(timezone.utc)
 
     # Commit the CollectionRun immediately so it persists even if collection fails.
-    run = CollectionRun(status=CollectionRunStatus.running, triggered_by="scheduler")
+    run = CollectionRun(status=CollectionRunStatus.running, triggered_by="scheduler",
+                        poll_interval_used=POLL_DURATION_MINUTES)
     db.add(run)
     db.commit()
     run_id = run.id

@@ -29,6 +29,7 @@ def health_check(db: Session = Depends(get_db)):
     collection = None
     if last_run:
         collection = {
+            "started_at": last_run.started_at.isoformat() if last_run.started_at else None,
             "last_collection_at": last_run.completed_at.isoformat() if last_run.completed_at else None,
             "last_collection_status": last_run.status,
             "duration_ms": last_run.duration_ms,

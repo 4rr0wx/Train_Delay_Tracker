@@ -252,13 +252,13 @@ def get_delay_distribution(
               AND tr.service_date >= CURRENT_DATE - MAKE_INTERVAL(days => :days)
             GROUP BY 1
             ORDER BY
-                CASE
+                MIN(CASE
                     WHEN ts.departure_delay_seconds IS NULL OR ts.departure_delay_seconds < 60  THEN 1
                     WHEN ts.departure_delay_seconds < 120                                       THEN 2
                     WHEN ts.departure_delay_seconds < 300                                       THEN 3
                     WHEN ts.departure_delay_seconds < 600                                       THEN 4
                     ELSE 5
-                END
+                END)
         """),
         {"direction": direction, "days": days, "product": product, "anchor": anchor},
     )

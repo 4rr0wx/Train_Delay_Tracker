@@ -100,7 +100,7 @@ def _slot_today(db: Session, station_id: str, direction: str, line_code: str,
     return {
         "seen_today": True,
         "delay_seconds": delay_s,
-        "delay_minutes": round(delay_s / 60, 1) if delay_s is not None else 0,
+        "delay_minutes": round(delay_s / 60, 1) if delay_s is not None else None,
         "cancelled": row.status == "cancelled",
         "last_updated_at": row.last_updated_at.isoformat() if row.last_updated_at else None,
     }
