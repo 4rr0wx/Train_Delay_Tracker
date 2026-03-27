@@ -5,6 +5,8 @@ import express from 'express'
 const hafas = createClient(oebbProfile, 'train-delay-tracker/1.0')
 const app = express()
 
+app.get('/health', (_req, res) => res.json({ ok: true }))
+
 function parseBool(val, def = true) {
   if (val === undefined) return def
   return val !== 'false'
