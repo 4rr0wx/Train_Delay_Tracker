@@ -37,6 +37,10 @@
         <span class="material-symbols-outlined nav-icon">bar_chart</span>
         <span>Statistiken</span>
       </button>
+      <button class="nav-item" onclick="switchTab('rohdaten')" id="nav-rohdaten">
+        <span class="material-symbols-outlined nav-icon">table_view</span>
+        <span>Rohdaten</span>
+      </button>
       <button class="nav-item" onclick="switchTab('umleitungen')" id="nav-umleitungen">
         <span class="material-symbols-outlined nav-icon">alt_route</span>
         <span>Umleitungen</span>
@@ -78,6 +82,9 @@
       </button>
       <button class="nav-item" onclick="switchTab('statistiken'); toggleMobileMenu();" id="mnav-statistiken">
         <span class="material-symbols-outlined nav-icon">bar_chart</span>Statistik
+      </button>
+      <button class="nav-item" onclick="switchTab('rohdaten'); toggleMobileMenu();" id="mnav-rohdaten">
+        <span class="material-symbols-outlined nav-icon">table_view</span>Rohdaten
       </button>
       <button class="nav-item" onclick="switchTab('umleitungen'); toggleMobileMenu();" id="mnav-umleitungen">
         <span class="material-symbols-outlined nav-icon">alt_route</span>Umleitungen
@@ -324,43 +331,17 @@
       <div class="editorial-grid chart-grid mt-10">
         
         <div class="chart-container surface-container-lowest ghost-outlier w-full">
-          <h4 class="headline-sm">Verspätungsaufbau nach Station</h4>
-          <p class="body-sm text-secondary mb-6">Ø Verspätungsminuten entlang der Route.</p>
-          <div class="chart-wrapper"><canvas id="chart-by-station"></canvas></div>
-        </div>
-
-        <div class="chart-container surface-container-lowest ghost-outlier">
-          <h4 class="headline-sm">Verspätungsverteilung CJX</h4>
-          <p class="body-sm text-secondary mb-6">Anzahl Fahrten nach Verspätungskategorie.</p>
-          <div class="chart-wrapper"><canvas id="chart-dist-cjx"></canvas></div>
-        </div>
-
-        <div class="chart-container surface-container-lowest ghost-outlier">
-          <h4 class="headline-sm">Verspätungsverteilung U6</h4>
-          <p class="body-sm text-secondary mb-6">Anzahl Fahrten nach Verspätungskategorie.</p>
-          <div class="chart-wrapper"><canvas id="chart-dist-u6"></canvas></div>
-        </div>
-
-        <div class="chart-container surface-container-lowest ghost-outlier w-full">
           <h4 class="headline-sm">Verspätungstrend (CJX)</h4>
           <p class="body-sm text-secondary mb-6">Entwicklung der durchschnittlichen Verspätung pro Tag.</p>
           <div class="chart-wrapper"><canvas id="chart-trend"></canvas></div>
         </div>
-        
-        <div class="chart-container surface-container-lowest ghost-outlier">
-          <h4 class="headline-sm">Nach Wochentag</h4>
-          <p class="body-sm text-secondary mb-6">Wann treten die größten Verzögerungen auf?</p>
-          <div class="chart-wrapper"><canvas id="chart-daily"></canvas></div>
-        </div>
-
-        <div class="chart-container surface-container-lowest ghost-outlier">
-          <h4 class="headline-sm">Nach Uhrzeit</h4>
-          <p class="body-sm text-secondary mb-6">Verspätungen im Tagesverlauf.</p>
-          <div class="chart-wrapper"><canvas id="chart-hourly"></canvas></div>
-        </div>
 
       </div>
 
+    </div>
+
+    <!-- ===== TAB: ROHDATEN ===== -->
+    <div id="tab-rohdaten" class="tab-content anim-fade-in" style="display:none">
       <!-- Raw Data Ledger -->
       <div class="ledger-section mt-16 surface-container-low p-6 ghost-outlier">
         <div class="ledger-header flex justify-between mb-6">
@@ -412,18 +393,6 @@
           <div class="kpi-data">
             <span class="kpi-value display-md text-primary" id="diversion-total">—</span>
             <span class="kpi-label label-sm uppercase">Erkannte Umleitungen</span>
-          </div>
-        </div>
-        <div class="kpi-card surface-container-lowest">
-          <div class="kpi-data">
-            <span class="kpi-value display-md" id="diversion-rate">—</span>
-            <span class="kpi-label label-sm uppercase">Umleitungsrate</span>
-          </div>
-        </div>
-        <div class="kpi-card surface-container-lowest">
-          <div class="kpi-data">
-            <span class="kpi-value display-md">90</span>
-            <span class="kpi-label label-sm uppercase">Tage Zeitraum</span>
           </div>
         </div>
       </div>

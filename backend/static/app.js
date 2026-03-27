@@ -78,8 +78,8 @@ function switchTab(tabId) {
   if (tabId === 'reisen') loadJourneys();
   if (tabId === 'statistiken') {
     loadStats();
-    loadDepartures();
   }
+  if (tabId === 'rohdaten') loadDepartures();
   if (tabId === 'umleitungen') loadDiversions();
 }
 
@@ -541,11 +541,7 @@ async function loadStats() {
   
   // 2. Load Charts
   await Promise.all([
-    renderTrendChart(baseParams),
-    renderStationChart(baseParams),
-    renderDistChart('regional', 'chart-dist-cjx', baseParams),
-    renderDistChart('subway', 'chart-dist-u6', baseParams),
-    renderHourlyChart(baseParams)
+    renderTrendChart(baseParams)
   ]);
 }
 
@@ -582,90 +578,6 @@ async function renderTrendChart(baseParams) {
       plugins: { legend: { display: false } },
       scales: { y: { beginAtZero: true } }
     }
-  });
-}
-
-async function renderStationChart(baseParams) {
-  // Simplified mock or generic API call if available, we use agg by station here if API supported it.
-  // Since our API currently supports group_by=product, we might need a custom endpoint, or mock
-  // Let's assume we can fetch departures group by station? 
-  // For the sake of UI completeness, here's the chart config:
-  setupChart('chart-by-station', {
-    type: 'bar',
-    data: {
-      labels: ['Ternitz', 'Wr. Neustadt', 'Baden', 'Meidling', 'Westbahnhof'],
-      datasets: [{
-        label: '+ Minuten',
-        data: [1, 2, 4, 6, 5], 
-        backgroundColor: chStyle.secondary,
-        borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } }
-    }
-  });
-}
-
-async function renderDistChart(product, targetId, baseParams) {
-  // Again, mock classification for visualization in the new design system
-  setupChart(targetId, {
-    type: 'doughnut',
-    data: {
-      labels: ['Pünktlich', '< 5 Min', '> 5 Min', 'Ausfall'],
-      datasets: [{
-        data: [70, 20, 8, 2],
-        backgroundColor: [chStyle.onSurface, chStyle.secondary, chStyle.tertiary, chStyle.primary],
-        borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      cutout: '70%',
-      plugins: {
-        legend: { position: 'right', labels: { usePointStyle: true, boxWidth: 8 } }
-      }
-    }
-  });
-  
-  // Real implementation for Hourly
-  if(product==='regional'){
-    renderDailyChart(baseParams);
-  }
-}
-
-async function renderDailyChart(baseParams) {
-  setupChart('chart-daily', {
-    type: 'bar',
-    data: {
-      labels: ['Mo', 'Di', 'Mi', 'Do', 'Fr'],
-      datasets: [{
-        label: 'Delay',
-        data: [4,3,6,5,8],
-        backgroundColor: chStyle.tertiary,
-        borderRadius: 4
-      }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} } }
-  });
-}
-
-async function renderHourlyChart(baseParams) {
-  setupChart('chart-hourly', {
-    type: 'line',
-    data: {
-      labels: ['06:00','07:00','08:00','16:00','17:00','18:00'],
-      datasets: [{
-        label: 'Delay',
-        data: [2,8,5,4,6,3],
-        borderColor: chStyle.onSurface,
-        borderWidth: 2,
-        tension: 0.4,
-        pointBackgroundColor: chStyle.surface
-      }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend:{display:false} } }
   });
 }
 
@@ -728,10 +640,6 @@ async function loadDiversions() {
   if(!res || !res.data) return;
   
   document.getElementById('diversion-total').textContent = res.total;
-  
-  // Mock total journeys calc for rate (in full app, pull from states)
-  const targetAgg = 450; 
-  document.getElementById('diversion-rate').textContent = `${((res.total / targetAgg)*100).toFixed(1)}%`;
   
   const container = document.getElementById('diversion-list');
   container.innerHTML = '';
