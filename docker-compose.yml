@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   hafas-oebb:
     build: ./hafas-oebb
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- 'http://localhost:3000/locations?query=Wien' || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 10s
 
   db:
     image: postgres:16-alpine
