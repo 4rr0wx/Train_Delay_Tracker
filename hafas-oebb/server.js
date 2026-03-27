@@ -1,5 +1,5 @@
-import createClient from 'hafas-client'
-import oebbProfile from 'hafas-client/p/oebb.js'
+import { createClient } from 'hafas-client'
+import { profile as oebbProfile } from 'hafas-client/p/oebb/index.js'
 import express from 'express'
 
 const hafas = createClient(oebbProfile, 'train-delay-tracker/1.0')
