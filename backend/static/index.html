@@ -3,385 +3,453 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pendelstrecke Ternitz ↔ Wien</title>
+  <meta name="description" content="Live-Dashboard für Zugverspätungen auf der Pendelstrecke Ternitz ↔ Wien Westbahnhof" />
+  <meta name="theme-color" content="#f8f9ff" />
+  <title>The Alpine Ledger</title>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  
   <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="surface">
 
-<!-- ===================== HEADER ===================== -->
-<header class="app-header">
-  <div class="header-inner">
-    <div class="header-brand">
-      <span class="header-logo">&#9650;</span>
-      <div>
-        <div class="header-title">Pendelstrecke</div>
-        <div class="header-subtitle">Ternitz ↔ Wien Westbahnhof</div>
+  <!-- ==================== SIDEBAR ==================== -->
+  <aside class="sidebar surface-container-lowest">
+    <div class="sidebar-header">
+      <h1 class="brand-title">The Alpine Ledger</h1>
+      <p class="brand-subtitle">RELIABILITY FIRST</p>
+    </div>
+    
+    <nav class="sidebar-nav" id="main-nav">
+      <button class="nav-item active" onclick="switchTab('heute')" id="nav-heute">
+        <span class="material-symbols-outlined nav-icon">train</span>
+        <span>Heute (Live)</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('reisen')" id="nav-reisen">
+        <span class="material-symbols-outlined nav-icon">history</span>
+        <span>Reiseverlauf</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('statistiken')" id="nav-statistiken">
+        <span class="material-symbols-outlined nav-icon">bar_chart</span>
+        <span>Statistiken</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('umleitungen')" id="nav-umleitungen">
+        <span class="material-symbols-outlined nav-icon">alt_route</span>
+        <span>Umleitungen</span>
+      </button>
+    </nav>
+    
+    <div class="sidebar-footer">
+      <div class="direction-toggle" id="direction-toggle">
+        <p class="nav-label">RICHTUNG</p>
+        <button class="toggle-btn active" id="dir-to-wien" onclick="setDirection('to_wien')">
+          <span class="material-symbols-outlined toggle-icon">north_east</span> → Wien
+        </button>
+        <button class="toggle-btn" id="dir-to-ternitz" onclick="setDirection('to_ternitz')">
+          <span class="material-symbols-outlined toggle-icon">south_west</span> → Ternitz
+        </button>
       </div>
     </div>
-    <div class="header-refresh">
-      <span id="refresh-indicator" class="refresh-dot"></span>
-      <span id="refresh-label" class="refresh-label">Live</span>
-      <span id="collection-status" class="collection-status" title="Letzte Datenerfassung"></span>
+  </aside>
+
+  <!-- ==================== TOP NAV (MOBILE ONLY) ==================== -->
+  <header class="mobile-header surface-container-lowest glass-blur">
+    <div class="mobile-header-inner">
+      <div class="brand">
+        <span class="brand-title-mobile">The Alpine Ledger</span>
+      </div>
+      <button class="icon-btn-ghost" onclick="toggleMobileMenu()">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
     </div>
-  </div>
-</header>
-
-<!-- ===================== NAV TABS (desktop) ===================== -->
-<nav class="tab-nav" id="main-nav">
-  <button class="tab-btn active" onclick="switchTab('heute')" id="nav-heute">Heute</button>
-  <button class="tab-btn" onclick="switchTab('reisen')" id="nav-reisen">Reiseverlauf</button>
-  <button class="tab-btn" onclick="switchTab('statistiken')" id="nav-statistiken">Statistiken</button>
-  <button class="tab-btn" onclick="switchTab('umleitungen')" id="nav-umleitungen">Umleitungen</button>
-</nav>
-
-<!-- ===================== FILTER PANEL ===================== -->
-<div class="filter-panel" id="filter-panel">
-  <div class="filter-toggle-bar" onclick="toggleFilter()">
-    <span class="filter-toggle-label">&#9881; Filter &amp; Zeitraum</span>
-    <span class="filter-toggle-arrow" id="filter-arrow">&#9660;</span>
-    <span class="filter-active-badge" id="filter-badge" style="display:none">aktiv</span>
-  </div>
-  <div class="filter-body" id="filter-body">
-    <div class="filter-row">
-      <div class="filter-group">
-        <label class="filter-label">Zeitraum (Schnellwahl)</label>
-        <div class="btn-group">
-          <button class="filter-btn active" onclick="setPresetDays(7)" id="preset-7">7 Tage</button>
-          <button class="filter-btn" onclick="setPresetDays(30)" id="preset-30">30 Tage</button>
-          <button class="filter-btn" onclick="setPresetDays(90)" id="preset-90">90 Tage</button>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label class="filter-label">Von</label>
-        <input type="date" class="filter-input" id="filter-date-from" onchange="onCustomDate()" />
-      </div>
-      <div class="filter-group">
-        <label class="filter-label">Bis</label>
-        <input type="date" class="filter-input" id="filter-date-to" onchange="onCustomDate()" />
-      </div>
-    </div>
-    <div class="filter-row">
-      <div class="filter-group">
-        <label class="filter-label">Wochentage</label>
-        <div class="btn-group dow-group">
-          <button class="filter-btn active" onclick="toggleDow(1)" id="dow-1">Mo</button>
-          <button class="filter-btn active" onclick="toggleDow(2)" id="dow-2">Di</button>
-          <button class="filter-btn active" onclick="toggleDow(3)" id="dow-3">Mi</button>
-          <button class="filter-btn active" onclick="toggleDow(4)" id="dow-4">Do</button>
-          <button class="filter-btn active" onclick="toggleDow(5)" id="dow-5">Fr</button>
-          <button class="filter-btn" onclick="toggleDow(6)" id="dow-6">Sa</button>
-          <button class="filter-btn" onclick="toggleDow(0)" id="dow-0">So</button>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label class="filter-label">Richtung</label>
-        <div class="btn-group">
-          <button class="filter-btn active" onclick="setDirection('to_wien')" id="dir-wien">→ Wien</button>
-          <button class="filter-btn" onclick="setDirection('to_ternitz')" id="dir-ternitz">→ Ternitz</button>
-        </div>
-      </div>
-    </div>
-    <div class="filter-row">
-      <div class="filter-group">
-        <label class="filter-label">Pendelzüge (CJX ab Ternitz)</label>
-        <div class="btn-group">
-          <button class="filter-btn" onclick="toggleTime('07:11')" id="time-0711">07:11</button>
-          <button class="filter-btn" onclick="toggleTime('07:40')" id="time-0740">07:40</button>
-          <button class="filter-btn active" onclick="clearTimes()" id="time-all">Alle Züge</button>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label class="filter-label">Linie</label>
-        <div class="btn-group">
-          <button class="filter-btn" onclick="setProduct('regional')" id="prod-cjx">CJX</button>
-          <button class="filter-btn" onclick="setProduct('subway')" id="prod-u6">U6</button>
-          <button class="filter-btn active" onclick="setProduct(null)" id="prod-all">Alle</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ===================== MAIN CONTENT ===================== -->
-<main class="app-main">
-
-  <!-- ===== TAB: HEUTE ===== -->
-  <div id="tab-heute" class="tab-content active">
-    <div class="today-header">
-      <button id="heute-prev" class="icon-btn" onclick="navigateTodayDate(-1)" disabled>&#8592;</button>
-      <div class="today-header-center">
-        <h2 id="today-date" class="today-date"></h2>
-        <span id="today-refresh" class="today-refresh-label"></span>
-      </div>
-      <div class="today-header-right">
-        <button id="heute-reset" class="icon-btn heute-reset-btn" onclick="resetToToday()" style="display:none">Heute</button>
-        <button id="heute-next" class="icon-btn" onclick="navigateTodayDate(+1)" disabled>&#8594;</button>
-      </div>
-    </div>
-
-    <div id="no-data-banner" class="alert-banner" style="display:none">
-      <span class="alert-icon">&#8505;</span>
-      <span>Für diesen Tag sind keine Fahrtdaten vorhanden (z.B. Wochenende oder kein Betrieb).</span>
-    </div>
-
-<section class="commute-section">
-      <div class="section-header">
-        <span class="section-badge cjx-badge">CJX</span>
-        <span class="section-badge u6-badge">U6</span>
-        <h3>Morgen &rarr; Wien</h3>
-        <span class="section-sub">Ternitz → Baden → Meidling → Westbahnhof</span>
-        <span class="conn-rate-badge" id="conn-rate-morning" style="display:none">
-          <span class="conn-rate-label">Anschluss</span>
-          <span class="conn-rate-value" id="conn-morning-pct">—</span>
-        </span>
-      </div>
-      <div id="morning-diversion-alert" class="section-alert" style="display:none">
-        <span>&#9888;</span> Umleitung erkannt &ndash; kein Halt in Baden!
-      </div>
-      <div class="trip-selector-row" id="morning-selector-row" style="display:none">
-        <label class="trip-selector-label" for="morning-trip-select">Verbindung:</label>
-        <select class="trip-select" id="morning-trip-select" onchange="selectTrip('morning', parseInt(this.value))"></select>
-      </div>
-      <div id="morning-cards" class="commute-cards"></div>
-      <div id="morning-connection" class="connection-hint alert-banner" style="display:none"></div>
-    </section>
-
-    <section class="commute-section">
-      <div class="section-header">
-        <span class="section-badge u6-badge">U6</span>
-        <span class="section-badge cjx-badge">CJX</span>
-        <h3>Abend &rarr; Ternitz</h3>
-        <span class="section-sub">Westbahnhof → Meidling → Baden → Ternitz</span>
-        <span class="conn-rate-badge" id="conn-rate-evening" style="display:none">
-          <span class="conn-rate-label">Anschluss</span>
-          <span class="conn-rate-value" id="conn-evening-pct">—</span>
-        </span>
-      </div>
-      <div id="evening-diversion-alert" class="section-alert" style="display:none">
-        <span>&#9888;</span> Umleitung erkannt &ndash; kein Halt in Baden!
-      </div>
-      <div class="trip-selector-row" id="evening-selector-row" style="display:none">
-        <label class="trip-selector-label" for="evening-trip-select">Verbindung:</label>
-        <select class="trip-select" id="evening-trip-select" onchange="selectTrip('evening', parseInt(this.value))"></select>
-      </div>
-      <div id="evening-cards" class="commute-cards"></div>
-      <div id="evening-connection" class="connection-hint alert-banner" style="display:none"></div>
-    </section>
-  </div>
-
-  <!-- ===== TAB: REISEVERLAUF ===== -->
-  <div id="tab-reisen" class="tab-content">
-    <div class="section-toolbar">
-      <div class="toolbar-info">
-        <span id="journey-count" class="journey-count">—</span>
-        <span class="journey-count-label">Reisen gefunden</span>
-      </div>
-      <div class="toolbar-pagination">
-        <button class="icon-btn" onclick="prevPage()" id="btn-prev" disabled>&#8592; Zurück</button>
-        <span id="page-indicator" class="page-indicator">Seite 1</span>
-        <button class="icon-btn" onclick="nextPage()" id="btn-next" disabled>Weiter &#8594;</button>
-      </div>
-    </div>
-    <div id="journey-list" class="journey-list">
-      <div class="empty-state">Wähle einen Zeitraum und klicke auf einen Filter.</div>
+  </header>
+  
+  <div class="mobile-menu surface-container-highest glass-blur" id="mobile-menu" style="display:none">
+    <nav class="mobile-nav">
+      <button class="nav-item active" onclick="switchTab('heute'); toggleMobileMenu();" id="mnav-heute">
+        <span class="material-symbols-outlined nav-icon">train</span>Heute
+      </button>
+      <button class="nav-item" onclick="switchTab('reisen'); toggleMobileMenu();" id="mnav-reisen">
+        <span class="material-symbols-outlined nav-icon">history</span>Reisen
+      </button>
+      <button class="nav-item" onclick="switchTab('statistiken'); toggleMobileMenu();" id="mnav-statistiken">
+        <span class="material-symbols-outlined nav-icon">bar_chart</span>Statistik
+      </button>
+      <button class="nav-item" onclick="switchTab('umleitungen'); toggleMobileMenu();" id="mnav-umleitungen">
+        <span class="material-symbols-outlined nav-icon">alt_route</span>Umleitungen
+      </button>
+    </nav>
+    <div class="mobile-direction">
+      <p class="nav-label">RICHTUNG</p>
+      <button class="toggle-btn active" id="mdir-wien" onclick="setDirection('to_wien'); toggleMobileMenu();">→ Wien</button>
+      <button class="toggle-btn" id="mdir-ternitz" onclick="setDirection('to_ternitz'); toggleMobileMenu();">→ Ternitz</button>
     </div>
   </div>
 
-  <!-- ===== TAB: STATISTIKEN ===== -->
-  <div id="tab-statistiken" class="tab-content">
-    <div class="stat-cards" id="stat-summary-cards">
-      <div class="stat-card">
-        <div class="stat-card-label">Gesamtreisen</div>
-        <div class="stat-card-value" id="stat-total">—</div>
+  <!-- ==================== MAIN CONTENT ==================== -->
+  <main class="main-content" id="app-main">
+    
+    <!-- Top Editorial Header (Global) -->
+    <header class="editorial-header">
+      <div class="header-left">
+        <span class="kicker text-primary" id="route-kicker">AKTUELLER ROUTENSTATUS</span>
+        <h2 class="editorial-title display-lg" id="editorial-route-title">Ternitz ↔ Wien</h2>
+        <div class="sync-status">
+          <div class="delay-pulse"><div class="pulse-ring"></div><div class="pulse-core"></div></div>
+          <span class="sync-text">Live Updates Synchronized with ÖBB Network</span>
+          <span class="collection-time text-muted" id="collection-status"></span>
+        </div>
       </div>
-      <div class="stat-card stat-card-accent">
-        <div class="stat-card-label">Ø Verspätung (Ankunft)</div>
-        <div class="stat-card-value" id="stat-avg-delay">—</div>
+      <div class="header-right">
+        <div class="clock-display display-lg" id="live-clock">--:--</div>
+        <div class="date-display label-md uppercase" id="live-date">---</div>
       </div>
-      <div class="stat-card stat-card-green">
-        <div class="stat-card-label">Pünktlich</div>
-        <div class="stat-card-value" id="stat-on-time">—</div>
+    </header>
+
+    <!-- ===== TAB: HEUTE ===== -->
+    <div id="tab-heute" class="tab-content active anim-fade-in">
+      
+      <!-- Date Navigation -->
+      <div class="day-nav surface-container-low">
+        <button class="icon-btn-ghost" id="heute-prev" onclick="navigateDate(-1)" disabled>
+          <span class="material-symbols-outlined">chevron_left</span>
+        </button>
+        <div class="day-nav-center">
+          <h3 class="title-lg" id="today-date"></h3>
+          <span class="label-sm text-muted" id="today-refresh"></span>
+        </div>
+        <button class="pill-btn-primary" id="heute-reset" onclick="resetToToday()" style="display:none">Today</button>
+        <button class="icon-btn-ghost" id="heute-next" onclick="navigateDate(+1)" disabled>
+          <span class="material-symbols-outlined">chevron_right</span>
+        </button>
       </div>
-      <div class="stat-card stat-card-red">
-        <div class="stat-card-label">Ausfälle</div>
-        <div class="stat-card-value" id="stat-cancelled">—</div>
+
+      <!-- No-data banner -->
+      <div class="alert-banner" id="no-data-banner" style="display:none">
+        <span class="material-symbols-outlined text-tertiary">info</span>
+        <span>Für diesen Tag sind keine Fahrtdaten vorhanden.</span>
       </div>
-      <div class="stat-card stat-card-orange">
-        <div class="stat-card-label">Umleitungen (kein Baden)</div>
-        <div class="stat-card-value" id="stat-diversions">—</div>
+
+      <!-- KPI Overview Strip -->
+      <div class="kpi-grid" id="kpi-strip">
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-icon-row">
+            <span class="material-symbols-outlined text-tertiary">schedule</span>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value display-md" id="kpi-ontime">—</span>
+            <span class="kpi-label label-sm uppercase">Pünktlich</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-icon-row">
+            <span class="material-symbols-outlined text-secondary">trending_up</span>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value display-md" id="kpi-avg-delay">—</span>
+            <span class="kpi-label label-sm uppercase">Ø Verspätung</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest border-left-accent">
+          <div class="kpi-icon-row">
+            <span class="material-symbols-outlined text-primary">warning</span>
+            <span class="chip-urgency label-sm">ALARM</span>
+          </div>
+          <div class="kpi-data">
+            <span class="kpi-value display-md text-primary" id="kpi-cancelled">—</span>
+            <span class="kpi-label label-sm uppercase">Ausfälle</span>
+          </div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Ø Verspätungsaufbau</div>
-        <div class="stat-card-value" id="stat-delay-added">—</div>
-        <div class="stat-card-sub">auf dem Weg zum Ziel</div>
-      </div>
+
+      <!-- Commute Primary Section (Morgen/Abend) -->
+      <section class="schedule-section mt-16" id="section-primary">
+        <div class="schedule-header">
+          <h3 class="headline-md" id="section-primary-title">Morgen → Wien</h3>
+          <p class="body-md text-secondary" id="section-primary-sub">Ternitz → Wr. Neustadt → Baden → Meidling → Westbahnhof</p>
+        </div>
+        
+        <div class="diversion-alert surface-container-highest" id="primary-diversion" style="display:none">
+          <span class="material-symbols-outlined text-primary">alt_route</span>
+          <span class="body-md bold">Umleitung:</span> <span>Kein Halt in Baden bei Wien.</span>
+        </div>
+        
+        <div class="schedule-list" id="primary-cards">
+          <!-- Populated by JS -->
+        </div>
+        
+        <div class="connection-status body-sm text-secondary mt-6" id="primary-connection" style="display:none"></div>
+      </section>
+
+      <!-- Commute Secondary Section -->
+      <section class="schedule-section mt-16" id="section-secondary">
+        <div class="schedule-header">
+          <h3 class="headline-md" id="section-secondary-title">Abend → Ternitz</h3>
+          <p class="body-md text-secondary" id="section-secondary-sub">Westbahnhof → Meidling → Baden → Wr. Neustadt → Ternitz</p>
+        </div>
+        
+        <div class="diversion-alert surface-container-highest" id="secondary-diversion" style="display:none">
+          <span class="material-symbols-outlined text-primary">alt_route</span>
+          <span class="body-md bold">Umleitung:</span> <span>Kein Halt in Baden bei Wien.</span>
+        </div>
+        
+        <div class="schedule-list" id="secondary-cards">
+          <!-- Populated by JS -->
+        </div>
+        
+        <div class="connection-status body-sm text-secondary mt-6" id="secondary-connection" style="display:none"></div>
+      </section>
+
     </div>
 
-    <div class="stats-period-bar">
-      <span class="stats-period-label">Zeitraum Statistiken:</span>
-      <div class="btn-group">
-        <button class="filter-btn" onclick="setStatsDays(7)" id="sdays-7">7 Tage</button>
-        <button class="filter-btn active" onclick="setStatsDays(30)" id="sdays-30">30 Tage</button>
-        <button class="filter-btn" onclick="setStatsDays(90)" id="sdays-90">90 Tage</button>
+    <!-- ===== TAB: REISEVERLAUF ===== -->
+    <div id="tab-reisen" class="tab-content anim-fade-in" style="display:none">
+      
+      <!-- Filter Bar -->
+      <div class="filter-bar surface-container-lowest glass-blur">
+        <div class="filter-header" onclick="toggleFilter()">
+          <span class="label-md bold uppercase">Filter & Timeline</span>
+          <span class="material-symbols-outlined" id="filter-chevron">expand_more</span>
+        </div>
+        
+        <div class="filter-body surface-container-low" id="filter-body" style="display:none">
+          <div class="editorial-grid filter-grid">
+            <div class="filter-col">
+              <span class="label-sm text-muted uppercase">Zeitraum</span>
+              <div class="chip-group">
+                <button class="chip-action active" onclick="setPresetDays(7)" id="preset-7">7 Tage</button>
+                <button class="chip-action" onclick="setPresetDays(30)" id="preset-30">30 Tage</button>
+                <button class="chip-action" onclick="setPresetDays(90)" id="preset-90">90 Tage</button>
+              </div>
+              <div class="date-inputs mt-4">
+                <input type="date" class="input-editorial body-sm" id="filter-date-from" onchange="onCustomDate()" />
+                <span class="text-secondary">—</span>
+                <input type="date" class="input-editorial body-sm" id="filter-date-to" onchange="onCustomDate()" />
+              </div>
+            </div>
+            <div class="filter-col">
+              <span class="label-sm text-muted uppercase">Wochentage</span>
+              <div class="chip-group">
+                <button class="chip-action active" onclick="toggleDow(1)" id="dow-1">Mo</button>
+                <button class="chip-action active" onclick="toggleDow(2)" id="dow-2">Di</button>
+                <button class="chip-action active" onclick="toggleDow(3)" id="dow-3">Mi</button>
+                <button class="chip-action active" onclick="toggleDow(4)" id="dow-4">Do</button>
+                <button class="chip-action active" onclick="toggleDow(5)" id="dow-5">Fr</button>
+                <button class="chip-action" onclick="toggleDow(6)" id="dow-6">Sa</button>
+                <button class="chip-action" onclick="toggleDow(0)" id="dow-0">So</button>
+              </div>
+            </div>
+            <div class="filter-col">
+              <span class="label-sm text-muted uppercase">Pendelzüge (Ternitz-Abfahrt)</span>
+              <div class="chip-group">
+                <button class="chip-action" onclick="toggleTime('07:11')" id="time-0711">07:11</button>
+                <button class="chip-action" onclick="toggleTime('07:40')" id="time-0740">07:40</button>
+                <button class="chip-action active" onclick="clearTimes()" id="time-all">Alle</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <!-- Toolbar -->
+      <div class="list-toolbar mt-10">
+        <div class="toolbar-stats">
+          <span class="display-sm" id="journey-count">—</span>
+          <span class="body-md text-secondary uppercase tracking-wide">Reisen gefunden</span>
+        </div>
+        <div class="toolbar-nav">
+          <button class="icon-btn-ghost" onclick="prevPage()" id="btn-prev" disabled>
+            <span class="material-symbols-outlined">arrow_back</span>
+          </button>
+          <span class="label-md" id="page-indicator">Seite 1</span>
+          <button class="icon-btn-ghost" onclick="nextPage()" id="btn-next" disabled>
+            <span class="material-symbols-outlined">arrow_forward</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- List -->
+      <div class="journey-ledger schedule-list mt-6" id="journey-list">
+        <div class="editorial-empty body-md text-secondary">Lade Daten aus dem ÖBB-Archiv...</div>
+      </div>
+
     </div>
 
-    <div class="charts-grid">
-      <div class="chart-card chart-card-wide">
-        <div class="chart-card-header">
-          <h4>Verspätungsaufbau nach Station</h4>
-          <p class="chart-desc">Ø Verspätung (Minuten) an jedem Halt entlang der Strecke</p>
+    <!-- ===== TAB: STATISTIKEN ===== -->
+    <div id="tab-statistiken" class="tab-content anim-fade-in" style="display:none">
+      
+      <!-- KPI Overview Strip -->
+      <div class="kpi-grid">
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-data">
+            <span class="kpi-value display-md" id="stat-total">—</span>
+            <span class="kpi-label label-sm uppercase">Gesamtreisen</span>
+          </div>
         </div>
-        <canvas id="chart-by-station"></canvas>
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-data">
+            <span class="kpi-value display-md text-secondary" id="stat-avg-delay">—</span>
+            <span class="kpi-label label-sm uppercase">Ø Verspätung</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-data">
+            <span class="kpi-value display-md" id="stat-on-time">—</span>
+            <span class="kpi-label label-sm uppercase">Pünktlich</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest border-left-accent">
+          <div class="kpi-data">
+            <span class="kpi-value display-md text-primary" id="stat-cancelled">—</span>
+            <span class="kpi-label label-sm uppercase">Ausfälle</span>
+          </div>
+        </div>
       </div>
 
-      <div class="chart-card">
-        <div class="chart-card-header">
-          <h4>Verspätungsverteilung CJX</h4>
-          <p class="chart-desc">Anzahl Fahrten nach Verspätungskategorie</p>
+      <!-- Time Period Selector -->
+      <div class="period-selector mt-10">
+        <span class="label-md bold uppercase tracking-wide text-secondary mr-4">ANALYSE-ZEITRAUM</span>
+        <div class="chip-group">
+          <button class="chip-action" onclick="setStatsDays(7)" id="sdays-7">7 Tage</button>
+          <button class="chip-action active" onclick="setStatsDays(30)" id="sdays-30">30 Tage</button>
+          <button class="chip-action" onclick="setStatsDays(90)" id="sdays-90">90 Tage</button>
         </div>
-        <canvas id="chart-dist-cjx"></canvas>
       </div>
 
-      <div class="chart-card">
-        <div class="chart-card-header">
-          <h4>Verspätungsverteilung U6</h4>
-          <p class="chart-desc">Anzahl Fahrten nach Verspätungskategorie</p>
+      <!-- Charts (Editorial Print style) -->
+      <div class="editorial-grid chart-grid mt-10">
+        
+        <div class="chart-container surface-container-lowest ghost-outlier w-full">
+          <h4 class="headline-sm">Verspätungsaufbau nach Station</h4>
+          <p class="body-sm text-secondary mb-6">Ø Verspätungsminuten entlang der Route.</p>
+          <div class="chart-wrapper"><canvas id="chart-by-station"></canvas></div>
         </div>
-        <canvas id="chart-dist-u6"></canvas>
+
+        <div class="chart-container surface-container-lowest ghost-outlier">
+          <h4 class="headline-sm">Verspätungsverteilung CJX</h4>
+          <p class="body-sm text-secondary mb-6">Anzahl Fahrten nach Verspätungskategorie.</p>
+          <div class="chart-wrapper"><canvas id="chart-dist-cjx"></canvas></div>
+        </div>
+
+        <div class="chart-container surface-container-lowest ghost-outlier">
+          <h4 class="headline-sm">Verspätungsverteilung U6</h4>
+          <p class="body-sm text-secondary mb-6">Anzahl Fahrten nach Verspätungskategorie.</p>
+          <div class="chart-wrapper"><canvas id="chart-dist-u6"></canvas></div>
+        </div>
+
+        <div class="chart-container surface-container-lowest ghost-outlier w-full">
+          <h4 class="headline-sm">Verspätungstrend (CJX)</h4>
+          <p class="body-sm text-secondary mb-6">Entwicklung der durchschnittlichen Verspätung pro Tag.</p>
+          <div class="chart-wrapper"><canvas id="chart-trend"></canvas></div>
+        </div>
+        
+        <div class="chart-container surface-container-lowest ghost-outlier">
+          <h4 class="headline-sm">Nach Wochentag</h4>
+          <p class="body-sm text-secondary mb-6">Wann treten die größten Verzögerungen auf?</p>
+          <div class="chart-wrapper"><canvas id="chart-daily"></canvas></div>
+        </div>
+
+        <div class="chart-container surface-container-lowest ghost-outlier">
+          <h4 class="headline-sm">Nach Uhrzeit</h4>
+          <p class="body-sm text-secondary mb-6">Verspätungen im Tagesverlauf.</p>
+          <div class="chart-wrapper"><canvas id="chart-hourly"></canvas></div>
+        </div>
+
       </div>
 
-      <div class="chart-card chart-card-wide">
-        <div class="chart-card-header">
-          <h4>Verspätungstrend (CJX)</h4>
-          <p class="chart-desc">Ø Verspätung und Anzahl Fahrten pro Tag</p>
+      <!-- Raw Data Ledger -->
+      <div class="ledger-section mt-16 surface-container-low p-6 ghost-outlier">
+        <div class="ledger-header flex justify-between mb-6">
+          <h4 class="headline-sm">Archiv der Abfahrten</h4>
+          <div class="ledger-filters flex gap-4">
+            <select class="input-editorial body-sm" id="table-product-filter" onchange="loadDepartures()">
+              <option value="">Alle Linien</option>
+              <option value="regional">Nur CJX</option>
+              <option value="subway">Nur U6</option>
+            </select>
+            <select class="input-editorial body-sm" id="table-status-filter" onchange="loadDepartures()">
+              <option value="">Alle Status</option>
+              <option value="on_time">Pünktlich</option>
+              <option value="delayed">Verspätet</option>
+              <option value="cancelled">Ausfall</option>
+            </select>
+          </div>
         </div>
-        <canvas id="chart-trend"></canvas>
+        
+        <div class="table-container">
+          <table class="editorial-table w-full" id="departures-table">
+            <thead>
+              <tr>
+                <th class="label-sm uppercase">Zeit</th>
+                <th class="label-sm uppercase">Linie</th>
+                <th class="label-sm uppercase">Zug</th>
+                <th class="label-sm uppercase">Zustieg</th>
+                <th class="label-sm uppercase">Ziel</th>
+                <th class="label-sm uppercase">Verspätung</th>
+                <th class="label-sm uppercase">Status</th>
+                <th class="label-sm uppercase">Gleis</th>
+              </tr>
+            </thead>
+            <tbody id="departures-tbody" class="body-sm">
+              <!-- populated by JS -->
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div class="chart-card">
-        <div class="chart-card-header">
-          <h4>Nach Wochentag (CJX)</h4>
-          <p class="chart-desc">Ø Verspätung je Wochentag</p>
-        </div>
-        <canvas id="chart-daily"></canvas>
-      </div>
-
-      <div class="chart-card">
-        <div class="chart-card-header">
-          <h4>Nach Uhrzeit (CJX)</h4>
-          <p class="chart-desc">Ø Verspätung je Stunde</p>
-        </div>
-        <canvas id="chart-hourly"></canvas>
-      </div>
-
-      <div class="chart-card chart-card-wide">
-        <div class="chart-card-header">
-          <h4>Vergleich 07:11 vs. 07:40</h4>
-          <p class="chart-desc">Ø Verspätung bei Abfahrt Ternitz – letzte 30 Tage, nur Mo–Fr</p>
-        </div>
-        <canvas id="chart-compare-trains"></canvas>
-      </div>
     </div>
 
-    <div class="table-section">
-      <div class="table-header">
-        <h4>Letzte Fahrten (Rohdaten)</h4>
-        <div class="table-filters">
-          <select class="filter-select" id="table-product-filter" onchange="loadDepartures()">
-            <option value="">CJX + U6</option>
-            <option value="regional">Nur CJX</option>
-            <option value="subway">Nur U6</option>
-          </select>
-          <select class="filter-select" id="table-status-filter" onchange="loadDepartures()">
-            <option value="">Alle Status</option>
-            <option value="on_time">Pünktlich</option>
-            <option value="delayed">Verspätet</option>
-            <option value="cancelled">Ausfall</option>
-          </select>
+    <!-- ===== TAB: UMLEITUNGEN ===== -->
+    <div id="tab-umleitungen" class="tab-content anim-fade-in" style="display:none">
+      
+      <!-- KPI Overview Strip -->
+      <div class="kpi-grid">
+        <div class="kpi-card surface-container-lowest border-left-accent">
+          <div class="kpi-data">
+            <span class="kpi-value display-md text-primary" id="diversion-total">—</span>
+            <span class="kpi-label label-sm uppercase">Erkannte Umleitungen</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-data">
+            <span class="kpi-value display-md" id="diversion-rate">—</span>
+            <span class="kpi-label label-sm uppercase">Umleitungsrate</span>
+          </div>
+        </div>
+        <div class="kpi-card surface-container-lowest">
+          <div class="kpi-data">
+            <span class="kpi-value display-md">90</span>
+            <span class="kpi-label label-sm uppercase">Tage Zeitraum</span>
+          </div>
         </div>
       </div>
-      <div class="table-wrapper">
-        <table class="data-table" id="departures-table">
-          <thead>
-            <tr>
-              <th>Zeit</th>
-              <th>Linie</th>
-              <th>Zug-Nr.</th>
-              <th>Station</th>
-              <th>Ziel</th>
-              <th>Verspätung</th>
-              <th>Status</th>
-              <th>Gleis</th>
-            </tr>
-          </thead>
-          <tbody id="departures-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
 
-  <!-- ===== TAB: UMLEITUNGEN ===== -->
-  <div id="tab-umleitungen" class="tab-content">
-    <div class="stat-cards">
-      <div class="stat-card stat-card-orange">
-        <div class="stat-card-label">Erkannte Umleitungen</div>
-        <div class="stat-card-value" id="diversion-total">—</div>
+      <!-- Info Block -->
+      <div class="editorial-info-box mt-10 surface-container-highest ghost-outlier flex gap-4 p-6">
+        <span class="material-symbols-outlined text-primary mt-1">info</span>
+        <div>
+          <h4 class="title-md mb-2">Die "Baden-Umleitung"</h4>
+          <p class="body-md text-secondary">
+            Fährt ein CJX-Zug auf der Pendlerstrecke aufgrund von Baustellen oder Störungen eine alternative Route, entfällt in der Regel der Halt in <strong>Baden bei Wien</strong>. 
+            Das System registriert eine Umleitung automatisch, wenn für eine Zugnummer Ankünfte/Abfahrten in Ternitz und Wien Meidling vorliegen, das Ereignisprotokoll in Baden jedoch fehlt.
+          </p>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Umleitungsrate</div>
-        <div class="stat-card-value" id="diversion-rate">—</div>
+
+      <!-- List -->
+      <h3 class="headline-sm mt-16 mb-6">Protokollierte Umleitungen</h3>
+      <div class="journey-ledger schedule-list" id="diversion-list">
+        <div class="editorial-empty body-md text-secondary">Lade Daten aus dem ÖBB-Archiv...</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-card-label">Betrachtungszeitraum</div>
-        <div class="stat-card-value" id="diversion-period">90 Tage</div>
-      </div>
+      
     </div>
 
-    <div class="info-box">
-      <span class="info-icon">&#9432;</span>
-      <div>
-        <strong>Was ist eine Umleitung?</strong><br />
-        Wenn ein CJX von Ternitz nach Wien über eine alternative Strecke fährt,
-        entfällt der Halt in <strong>Baden bei Wien</strong>. Diese Fahrten werden
-        automatisch erkannt: eine Fahrt gilt als Umleitung, wenn Beobachtungen
-        in Ternitz <em>und</em> Wien Meidling vorliegen, aber <em>kein</em> Halt
-        in Baden erfasst wurde. Die Erkennung ist ab dem Zeitpunkt aktiv, ab dem
-        Baden im System erfasst wird.
-      </div>
-    </div>
+  </main>
 
-    <div id="diversion-list" class="diversion-list">
-      <div class="empty-state">Lade Umleitungsdaten…</div>
-    </div>
-  </div>
-
-</main>
-
-<!-- ===================== MOBILE BOTTOM NAV ===================== -->
-<nav class="bottom-nav" id="bottom-nav">
-  <button class="bottom-nav-btn active" onclick="switchTab('heute')" id="bnav-heute">
-    <span class="bnav-icon">&#9737;</span>
-    <span class="bnav-label">Heute</span>
-  </button>
-  <button class="bottom-nav-btn" onclick="switchTab('reisen')" id="bnav-reisen">
-    <span class="bnav-icon">&#9654;</span>
-    <span class="bnav-label">Reisen</span>
-  </button>
-  <button class="bottom-nav-btn" onclick="switchTab('statistiken')" id="bnav-statistiken">
-    <span class="bnav-icon">&#9650;</span>
-    <span class="bnav-label">Statistik</span>
-  </button>
-  <button class="bottom-nav-btn" onclick="switchTab('umleitungen')" id="bnav-umleitungen">
-    <span class="bnav-icon">&#8644;</span>
-    <span class="bnav-label">Umleitungen</span>
-  </button>
-</nav>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
