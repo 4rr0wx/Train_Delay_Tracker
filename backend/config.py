@@ -1,7 +1,7 @@
 import os
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://tracker:tracker_secret@localhost:5432/train_tracker")
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://oebb.macistry.com/api")
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://hafas-oebb:3000")
 
 # Station IDs (confirmed via ÖBB REST API)
 TERNITZ_STATION_ID = os.environ.get("TERNITZ_STATION_ID", "1131839")

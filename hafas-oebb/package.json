@@ -1,0 +1,10 @@
+{
+  "name": "hafas-oebb-rest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "hafas-client": "^6",
+    "express": "^4"
+  }
+}
