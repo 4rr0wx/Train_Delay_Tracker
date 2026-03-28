@@ -200,21 +200,17 @@ async function loadHeuteData() {
   document.getElementById('today-refresh').textContent = `Letztes Update: ${new Date().toLocaleTimeString('de-AT', {hour:'2-digit', minute:'2-digit'})}`;
   
   // 1. Fetch KPI Stats
-  const statsOpts = {
-    group_by: "none",
-    direction: state.direction,
-    date_from: dateStr,
-    date_to: dateStr
-  };
-  const statsRes = await fetchAPI('/api/stats?' + new URLSearchParams(statsOpts));
-  
-  if (statsRes && statsRes.data && statsRes.data.length > 0) {
-    const s = statsRes.data[0];
-    const onTimePerc = s.total_trains > 0 ? Math.round((s.on_time_trains / s.total_trains)*100) : 0;
-    
+  const statsRes = await fetchAPI(`/api/stats?direction=${state.direction}&days=1`);
+
+  if (statsRes && statsRes.total_trains > 0) {
+    const onTimePerc = statsRes.delay_stats
+      ? Math.round(statsRes.delay_stats.on_time_pct)
+      : 0;
     document.getElementById('kpi-ontime').textContent = `${onTimePerc}%`;
-    document.getElementById('kpi-avg-delay').textContent = fmtDelay(s.avg_delay_seconds);
-    document.getElementById('kpi-cancelled').textContent = s.cancelled_trains;
+    document.getElementById('kpi-avg-delay').textContent = fmtDelay(
+      statsRes.delay_stats ? statsRes.delay_stats.average_seconds : 0
+    );
+    document.getElementById('kpi-cancelled').textContent = statsRes.cancelled_count;
     document.getElementById('no-data-banner').style.display = 'none';
     document.getElementById('kpi-strip').style.display = 'grid';
   } else {
@@ -224,68 +220,65 @@ async function loadHeuteData() {
   }
   
   // 2. Fetch Commute Trips (Primary/Secondary concept)
-  // For standard "to_wien" morning is primary. For "to_ternitz" evening is primary.
+  // Backend returns { morning: [...to_wien trips], evening: [...to_ternitz trips] }
   const isWien = state.direction === 'to_wien';
-  
-  document.getElementById('section-primary-title').innerHTML = isWien ? 'Morgenpendel → Wien' : 'Morgenpendel → Ternitz';
-  document.getElementById('section-secondary-title').innerHTML = isWien ? 'Abendpendel → Ternitz' : 'Abendpendel → Wien';
-  
-  // Fetch specific times
-  const pTime = isWien ? '07:11' : '07:05'; // Morning
-  const sTime = isWien ? '16:05' : '16:11'; // Evening
-  
-  const endpointPrimary = `/api/commute/trips?date=${dateStr}&time=${pTime}&direction=${isWien ? 'to_wien' : 'to_ternitz'}`;
-  const endpointSecondary = `/api/commute/trips?date=${dateStr}&time=${sTime}&direction=${isWien ? 'to_ternitz' : 'to_wien'}`;
-  
-  const [dataP, dataS] = await Promise.all([ fetchAPI(endpointPrimary), fetchAPI(endpointSecondary) ]);
-  
-  renderCommuteSection('primary', dataP);
-  renderCommuteSection('secondary', dataS);
+
+  document.getElementById('section-primary-title').innerHTML = isWien ? 'Morgenpendel → Wien' : 'Abendpendel → Ternitz';
+  document.getElementById('section-secondary-title').innerHTML = isWien ? 'Abendpendel → Ternitz' : 'Morgenpendel → Wien';
+
+  const commuteData = await fetchAPI(`/api/commute/trips?date=${dateStr}`);
+  const morning = commuteData ? commuteData.morning : [];
+  const evening = commuteData ? commuteData.evening : [];
+
+  renderCommuteSection('primary',   isWien ? morning : evening);
+  renderCommuteSection('secondary', isWien ? evening : morning);
 }
 
-function renderCommuteSection(slot, data) {
+function renderCommuteSection(slot, trips) {
   const container = document.getElementById(`${slot}-cards`);
   const diversionEl = document.getElementById(`${slot}-diversion`);
   container.innerHTML = '';
-  
-  if (!data || !data.trips || data.trips.length === 0) {
+
+  if (!trips || trips.length === 0) {
     container.innerHTML = `<div class="editorial-empty body-md text-secondary">Keine Fahrten im ausgewählten Zeitfenster.</div>`;
     diversionEl.style.display = 'none';
     return;
   }
-  
-  let hasDiversion = false;
-  
+
   // For simplicity, take the first trip
-  const trip = data.trips[0];
-  
-  if (trip.cjx_diversion) hasDiversion = true;
-  diversionEl.style.display = hasDiversion ? 'flex' : 'none';
-  
+  const trip = trips[0];
+
+  diversionEl.style.display = trip.is_diverted ? 'flex' : 'none';
+
+  // Normalize CJX data to match createScheduleCardHTML expectations
+  const cjxPart = trip.cjx ? {
+    delay_seconds: trip.cjx.today ? trip.cjx.today.delay_seconds : 0,
+    status: (trip.cjx.today && trip.cjx.today.cancelled) ? 'cancelled' : 'ok',
+    planned_arrival: trip.cjx.planned_departure,
+    to_station: trip.cjx.to_station,
+    platform: null,
+  } : null;
+
+  // Normalize U6 data
+  const u6Part = trip.u6 ? {
+    delay_seconds: trip.u6.today ? trip.u6.today.delay_seconds : 0,
+    status: (trip.u6.today && trip.u6.today.cancelled) ? 'cancelled' : 'ok',
+    planned_arrival: trip.u6.planned_departure,
+    to_station: trip.u6.to_station,
+    platform: null,
+  } : null;
+
   // Render CJX Part
-  container.insertAdjacentHTML('beforeend', createScheduleCardHTML(trip.cjx_part, 'CJX9', 'Regionalexpress'));
-  
-  // Render U6 Part (if to Wien)
-  if (trip.u6_part) {
-    container.insertAdjacentHTML('beforeend', createScheduleCardHTML(trip.u6_part, 'U6', 'U-Bahn'));
+  container.insertAdjacentHTML('beforeend', createScheduleCardHTML(cjxPart, 'CJX9', 'Regionalexpress'));
+
+  // Render U6 Part (if present)
+  if (u6Part) {
+    container.insertAdjacentHTML('beforeend', createScheduleCardHTML(u6Part, 'U6', 'U-Bahn'));
   }
-  
-  // Connection logic
+
+  // Connection status not provided by backend — hide
   const connEl = document.getElementById(`${slot}-connection`);
-  if (trip.connection_status) {
-    connEl.style.display = 'block';
-    
-    // The No-Border Rule: Use text weight/color instead of boxes
-    if (trip.connection_status === 'OK') {
-      connEl.innerHTML = `<strong>Anschluss:</strong> Erreicht. Umsteigezeit: ${fmtDelay(trip.transfer_time_seconds)}`;
-      connEl.className = 'connection-status body-sm text-secondary mt-4';
-    } else {
-      connEl.innerHTML = `<strong>Anschluss Warnung:</strong> Umsteigen knapp oder verpasst.`;
-      connEl.className = 'connection-status body-sm text-primary mt-4';
-    }
-  } else {
-    connEl.style.display = 'none';
-  }
+  connEl.style.display = 'none';
 }
 
 function createScheduleCardHTML(part, lineType, desc) {
@@ -298,7 +291,9 @@ function createScheduleCardHTML(part, lineType, desc) {
   if (isCancelled) { statusText = 'AUSFALL'; statusClass = 'delayed'; }
   else if (isDelayed) { statusText = `+${Math.round(part.delay_seconds/60)} MIN`; statusClass = 'delayed'; }
   
-  const tArr = part.planned_arrival ? part.planned_arrival.substring(11, 16) : '--:--';
+  const tArr = part.planned_arrival
+    ? (part.planned_arrival.length <= 5 ? part.planned_arrival : part.planned_arrival.substring(11, 16))
+    : '--:--';
   const dest = part.to_station || 'Wien';
   const plat = part.platform || '-';
   
